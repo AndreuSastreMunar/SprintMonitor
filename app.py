@@ -53,8 +53,7 @@ def card(col,icon,title,subtitle,number,target,key):
         if st.button(f"Abrir {title}",key=key): st.session_state.view=target; st.rerun()
 
 def back(target="home",label="Volver al inicio"):
-    if st.button(f"← {label}"):
-        st.session_state.view=target; st.rerun()
+    if st.button(f"← {label}"): st.session_state.view=target; st.rerun()
 
 def athlete_home(user,profile):
     header(profile,"ATLETA"); c1,c2=st.columns(2); card(c1,"🏃","Entrenamiento","Series, tiempos y RPE",1,"training","m1"); card(c2,"❤️","Wellness","Cómo te encuentras hoy",2,"wellness","m2")
@@ -81,7 +80,7 @@ def training(user):
             updated.append({"d":d,"r":int(reps),"rec":rec,"t":times})
     st.session_state.blocks=updated
     if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"d":60.0,"r":1,"rec":5.0,"t":[0.0]}); st.rerun()
-    total=sum(b["d"]*b["r"] for b in st.session_state.blocks); st.info(f"Volumen total: **{total:.0f} m** · sRPE: **{duration*rpe:.0f} UA**")
+    total=sum(b["d"]*b["r"] for b in st.session_state.blocks); st.info(f"Volumen total: **{total:.0f} m** · RPE: **{rpe:g}** · Carga: **{total*rpe:.0f} UA**")
     if st.button("💾 Guardar entrenamiento",type="primary"):
         try:
             s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"notes":notes or None}).execute().data[0]
@@ -116,9 +115,9 @@ def cycle(user,profile):
     if save: supabase.table("menstrual_cycles").insert({"athlete_id":user.id,"start_date":str(start),"end_date":str(end) if ended else None,"share_with_coach":share,"notes":notes or None}).execute(); st.success("Registro guardado.")
 
 def evolution(user):
-    back(); st.title("📈 Mi evolución"); sessions=supabase.table("training_sessions").select("session_date,rpe,srpe_load").eq("athlete_id",user.id).order("session_date").limit(60).execute().data; comps=supabase.table("competitions").select("competition_date,event,result_seconds,wind,competition_name").eq("athlete_id",user.id).order("competition_date").limit(40).execute().data
+    back(); st.title("📈 Mi evolución"); sessions=supabase.table("training_sessions").select("session_date,volume_m,rpe,srpe_load").eq("athlete_id",user.id).order("session_date").limit(60).execute().data; comps=supabase.table("competitions").select("competition_date,event,result_seconds,wind,competition_name").eq("athlete_id",user.id).order("competition_date").limit(40).execute().data
     if sessions:
-        df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
+        df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna (metros × RPE)"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
     else: st.info("Todavía no hay entrenamientos.")
     if comps: st.subheader("Competiciones"); st.dataframe(pd.DataFrame(comps),use_container_width=True,hide_index=True)
 
@@ -136,8 +135,7 @@ def coach_athletes(user):
     for a in athletes:
         with st.container(border=True):
             st.markdown(f"### {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m")
-            if st.button("Ver ficha del atleta",key=f"athlete_{a['id']}"):
-                st.session_state.selected_athlete=a; st.session_state.view="coach_athlete_detail"; st.rerun()
+            if st.button("Ver ficha del atleta",key=f"athlete_{a['id']}"): st.session_state.selected_athlete=a; st.session_state.view="coach_athlete_detail"; st.rerun()
 
 def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
     try:
@@ -150,23 +148,21 @@ def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
 def coach_athlete_detail(user):
     back("coach_athletes","Volver a Mis atletas"); a=st.session_state.get("selected_athlete")
     if not a: st.session_state.view="coach_athletes"; st.rerun()
-    st.title(f"👤 {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m")
-    aid=a["id"]
-    sessions=safe_query("training_sessions","id,session_date,duration_minutes,rpe,srpe_load,notes",aid,"session_date",120)
+    st.title(f"👤 {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m"); aid=a["id"]
+    sessions=safe_query("training_sessions","id,session_date,duration_minutes,volume_m,rpe,srpe_load,notes",aid,"session_date",120)
     wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120)
     comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100)
     cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
     tabs=st.tabs(["Entrenamientos","Series y tiempos","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
     with tabs[0]:
-        if sessions: st.dataframe(pd.DataFrame(sessions)[[c for c in ["session_date","duration_minutes","rpe","srpe_load","notes"] if c in pd.DataFrame(sessions).columns]],use_container_width=True,hide_index=True)
+        if sessions: st.dataframe(pd.DataFrame(sessions)[[c for c in ["session_date","volume_m","duration_minutes","rpe","srpe_load","notes"] if c in pd.DataFrame(sessions).columns]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay entrenamientos registrados.")
     with tabs[1]:
         if not sessions: st.info("Todavía no hay series registradas.")
         else:
             session_ids=[x["id"] for x in sessions]
             try:
-                sets=supabase.table("sprint_sets").select("id,session_id,set_order,distance_m,repetitions,recovery_seconds").in_("session_id",session_ids).order("set_order").execute().data or []
-                set_ids=[x["id"] for x in sets]
+                sets=supabase.table("sprint_sets").select("id,session_id,set_order,distance_m,repetitions,recovery_seconds").in_("session_id",session_ids).order("set_order").execute().data or []; set_ids=[x["id"] for x in sets]
                 reps=supabase.table("sprint_reps").select("sprint_set_id,rep_number,time_seconds").in_("sprint_set_id",set_ids).order("rep_number").execute().data if set_ids else []
                 date_by_session={x["id"]:x["session_date"] for x in sessions}; set_by_id={x["id"]:x for x in sets}; rows=[]
                 for r in reps or []:
@@ -176,7 +172,7 @@ def coach_athlete_detail(user):
             except Exception as e: st.warning(f"No se pudieron cargar las series: {e}")
     with tabs[2]:
         if sessions:
-            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.line_chart(df.set_index("session_date")[["rpe"]]); st.dataframe(df[["session_date","rpe","srpe_load"]],use_container_width=True,hide_index=True)
+            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.line_chart(df.set_index("session_date")[["rpe"]]); st.dataframe(df[["session_date","volume_m","rpe","srpe_load"]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay datos de RPE.")
     with tabs[3]:
         if wellness_rows:
@@ -191,28 +187,50 @@ def coach_athlete_detail(user):
         else: st.info("No hay registros del ciclo compartidos con el entrenador.")
     with tabs[6]:
         if sessions:
-            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
+            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna (metros × RPE)"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
         if comps:
-            cdf=pd.DataFrame(comps); cdf["competition_date"]=pd.to_datetime(cdf["competition_date"]); st.subheader("Marcas de competición");
+            cdf=pd.DataFrame(comps); cdf["competition_date"]=pd.to_datetime(cdf["competition_date"]); st.subheader("Marcas de competición")
             for event in cdf["event"].dropna().unique():
                 edf=cdf[cdf["event"]==event].set_index("competition_date"); st.caption(str(event)); st.line_chart(edf[["result_seconds"]])
         if not sessions and not comps: st.info("Todavía no hay datos suficientes para mostrar evolución.")
 
+def _period_series(df, value_col, period, aggregation):
+    x=df.copy()
+    if period=="Día": x["periodo"]=x["session_date"].dt.floor("D")
+    elif period=="Semana": x["periodo"]=x["session_date"].dt.to_period("W").apply(lambda p:p.start_time)
+    else: x["periodo"]=x["session_date"].dt.to_period("M").apply(lambda p:p.start_time)
+    return x.pivot_table(index="periodo",columns="atleta",values=value_col,aggfunc=aggregation,fill_value=0).sort_index()
+
+def _render_group_metric(df,title,value_col,unit,aggregation,key):
+    st.subheader(title)
+    period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"period_{key}")
+    series=_period_series(df,value_col,period,aggregation)
+    if series.empty: st.info("No hay datos para este periodo."); return
+    st.line_chart(series)
+    table=series.reset_index().rename(columns={"periodo":period})
+    st.dataframe(table,use_container_width=True,hide_index=True)
+    st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
+    if aggregation=="mean": comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:f"{title.lower()}_medio"})
+    else: comparison=df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:f"{title.lower()}_total"})
+    comparison=comparison.sort_values(comparison.columns[-1],ascending=False); st.markdown("**Comparativa del grupo**"); st.bar_chart(comparison.set_index("atleta")); st.dataframe(comparison,use_container_width=True,hide_index=True)
+
 def coach_group_load(user):
-    back("home"); st.title("📊 Carga del grupo"); st.caption("Carga diaria, semanal y comparación entre atletas.")
+    back("home"); st.title("📊 Carga del grupo"); st.caption("Elige qué variable quieres analizar y después visualízala por día, semana o mes.")
     athletes=supabase.table("profiles").select("id,full_name,email").eq("coach_id",user.id).execute().data
     if not athletes: st.info("Todavía no tienes atletas asignados."); return
     names={a["id"]:(a.get("full_name") or a.get("email")) for a in athletes}; ids=list(names)
-    try: rows=supabase.table("training_sessions").select("athlete_id,session_date,duration_minutes,rpe,srpe_load").in_("athlete_id",ids).order("session_date").limit(1000).execute().data or []
+    try: rows=supabase.table("training_sessions").select("athlete_id,session_date,volume_m,rpe,srpe_load").in_("athlete_id",ids).order("session_date").limit(1000).execute().data or []
     except Exception as e: st.warning(f"No se pudo cargar la carga del grupo: {e}"); return
     if not rows: st.info("Todavía no hay entrenamientos del grupo."); return
-    df=pd.DataFrame(rows); df["session_date"]=pd.to_datetime(df["session_date"]); df["atleta"]=df["athlete_id"].map(names); df["srpe_load"]=pd.to_numeric(df["srpe_load"],errors="coerce").fillna(pd.to_numeric(df["duration_minutes"],errors="coerce").fillna(0)*pd.to_numeric(df["rpe"],errors="coerce").fillna(0))
-    st.subheader("Carga diaria"); daily=df.pivot_table(index="session_date",columns="atleta",values="srpe_load",aggfunc="sum",fill_value=0).sort_index(); st.line_chart(daily); st.dataframe(daily.reset_index(),use_container_width=True,hide_index=True)
-    st.subheader("Carga semanal"); weekly=df.assign(semana=df["session_date"].dt.to_period("W").apply(lambda x:x.start_time)).pivot_table(index="semana",columns="atleta",values="srpe_load",aggfunc="sum",fill_value=0).sort_index(); st.line_chart(weekly); st.dataframe(weekly.reset_index(),use_container_width=True,hide_index=True)
-    st.subheader("Comparativa del grupo"); comparison=df.groupby("atleta",as_index=False).agg(carga_total=("srpe_load","sum"),carga_media_sesion=("srpe_load","mean"),sesiones=("srpe_load","size"),rpe_medio=("rpe","mean")).sort_values("carga_total",ascending=False); st.bar_chart(comparison.set_index("atleta")[["carga_total"]]); st.dataframe(comparison,use_container_width=True,hide_index=True)
+    df=pd.DataFrame(rows); df["session_date"]=pd.to_datetime(df["session_date"]); df["atleta"]=df["athlete_id"].map(names)
+    for c in ["volume_m","rpe","srpe_load"]: df[c]=pd.to_numeric(df[c],errors="coerce").fillna(0)
+    t1,t2,t3=st.tabs(["📏 Metros","🎯 RPE","⚡ Metros × RPE"])
+    with t1: _render_group_metric(df,"Metros","volume_m","m","sum","meters")
+    with t2: _render_group_metric(df,"RPE","rpe","0–10","mean","rpe")
+    with t3: _render_group_metric(df,"Metros × RPE","srpe_load","UA","sum","load")
 
 def coach_home(user,profile):
-    header(profile,"ENTRENADOR"); c1,c2=st.columns(2); card(c1,"👥","Mis atletas","Consulta el grupo",1,"coach_athletes","coach_m1"); card(c2,"📊","Carga del grupo","Carga diaria y semanal",2,"coach_group_load","coach_m2"); st.divider()
+    header(profile,"ENTRENADOR"); c1,c2=st.columns(2); card(c1,"👥","Mis atletas","Consulta el grupo",1,"coach_athletes","coach_m1"); card(c2,"📊","Carga del grupo","Metros, RPE y carga",2,"coach_group_load","coach_m2"); st.divider()
     if st.button("Cerrar sesión"): sign_out()
 
 user=login()
