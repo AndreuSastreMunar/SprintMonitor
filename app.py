@@ -34,6 +34,12 @@ def sign_out():
     st.rerun()
 
 
+def go_home_with_message(message):
+    st.session_state.flash_message=message
+    st.session_state.view="home"
+    st.rerun()
+
+
 def login():
     if "user" in st.session_state: return st.session_state.user
     st.markdown('<div class="brand">SPRINT MONITOR</div><div class="hello">100 / 200 m</div><div class="sub">Entrenamiento, bienestar, competición y evolución.</div>', unsafe_allow_html=True)
@@ -96,7 +102,9 @@ def _period_label(df,date_col,period):
 
 
 def athlete_home(user,profile):
-    header(profile,"ATLETA"); c1,c2=st.columns(2); card(c1,"🏃","Entrenamiento","Series, tiempos y RPE",1,"training","m1"); card(c2,"❤️","Wellness","Cómo te encuentras hoy",2,"wellness","m2")
+    if st.session_state.get("flash_message"):
+        st.success(st.session_state.pop("flash_message"))
+    header(profile,"ATLETA"); c1,c2=st.columns(2); card(c1,"🏃","Entrenamiento","Series, metros y RPE",1,"training","m1"); card(c2,"❤️","Wellness","Cómo te encuentras hoy",2,"wellness","m2")
     if profile.get("sex")=="female":
         c3,c4=st.columns(2); card(c3,"🌸","Ciclo menstrual","Registro privado",3,"cycle","m3"); card(c4,"🏆","Competición","60, 100, 200 y 400 m",4,"competition","m4")
         st.markdown('<div class="menu-card"><div class="menu-icon">📈</div><div class="menu-title">Mi evolución</div><div class="menu-sub">Marcas, carga y bienestar</div><div class="menu-num">5</div></div>',unsafe_allow_html=True)
@@ -110,42 +118,50 @@ def athlete_home(user,profile):
 
 def training(user):
     back(); st.title("🏃 Entrenamiento"); st.caption("RPE única para toda la sesión.")
-    if "blocks" not in st.session_state: st.session_state.blocks=[{"d":60.0,"r":3,"rec":6.0,"t":[0.0,0.0,0.0]}]
+    if "blocks" not in st.session_state: st.session_state.blocks=[{"d":60.0,"r":3,"rec":6.0}]
     day=st.date_input("Fecha",date.today()); duration=st.number_input("Duración total (min)",1,300,75); rpe=st.slider("RPE global",0.0,10.0,5.0,0.5); notes=st.text_area("Comentarios generales"); updated=[]
     for i,b in enumerate(st.session_state.blocks):
         with st.container(border=True):
-            st.markdown(f"**Bloque {i+1}**"); x,y,z=st.columns(3); d=x.number_input("Metros",1.0,500.0,float(b["d"]),5.0,key=f"d{i}"); reps=y.number_input("Veces",1,20,int(b["r"]),key=f"r{i}"); rec=z.number_input("Recuperación (min)",0.0,30.0,float(b["rec"]),0.5,key=f"rec{i}"); old=(list(b["t"])+[0.0]*reps)[:reps]; times=[]
-            for n in range(reps): times.append(st.number_input(f"Tiempo rep. {n+1} (s)",0.0,120.0,float(old[n]),0.01,format="%.3f",key=f"t{i}_{n}"))
-            valid=[x for x in times if x>0]; st.caption(f"Volumen: {d*reps:.0f} m"+(f" · Mejor: {min(valid):.3f} s" if valid else ""))
+            st.markdown(f"**Bloque {i+1}**"); x,y,z=st.columns(3); d=x.number_input("Metros",1.0,500.0,float(b["d"]),5.0,key=f"d{i}"); reps=y.number_input("Veces",1,20,int(b["r"]),key=f"r{i}"); rec=z.number_input("Recuperación (min)",0.0,30.0,float(b["rec"]),0.5,key=f"rec{i}")
+            st.caption(f"Volumen: {d*reps:.0f} m")
             if st.button("Eliminar bloque",key=f"del{i}",disabled=len(st.session_state.blocks)==1): st.session_state.blocks.pop(i); st.rerun()
-            updated.append({"d":d,"r":int(reps),"rec":rec,"t":times})
+            updated.append({"d":d,"r":int(reps),"rec":rec})
     st.session_state.blocks=updated
-    if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"d":60.0,"r":1,"rec":5.0,"t":[0.0]}); st.rerun()
+    if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"d":60.0,"r":1,"rec":5.0}); st.rerun()
     total=sum(b["d"]*b["r"] for b in st.session_state.blocks); st.info(f"Volumen total: **{total:.0f} m** · RPE: **{rpe:g}** · Carga: **{total*rpe:.0f} UA**")
 
-    st.markdown("### Estado de salud al finalizar")
-    completed_ok=st.radio("¿Has podido completar todo el entrenamiento sin ningún problema de salud?",["Sí","No"],horizontal=True,key="health_completed_ok")
-    health_status="completed_no_problem"
-    if completed_ok=="No":
+    st.markdown("### Finalización de entreno")
+    completed_ok=st.radio("¿Has podido completar todo el entrenamiento sin ningún problema de salud?",["Sí","No"],horizontal=True,index=None,key="health_completed_ok")
+    health_status=None
+    reason=None
+    if completed_ok=="Sí":
+        health_status="completed_no_problem"
+    elif completed_ok=="No":
         reason=st.radio("Indica el motivo",[
             "He completado el entrenamiento con algún problema de salud.",
             "He adaptado el entrenamiento debido a problemas de salud.",
             "No he podido completar el entrenamiento debido a problemas de salud.",
-        ],key="health_reason")
-        health_status={
-            "He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem",
-            "He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem",
-            "No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem",
-        }[reason]
+        ],index=None,key="health_reason")
+        if reason:
+            health_status={
+                "He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem",
+                "He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem",
+                "No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem",
+            }[reason]
 
     if st.button("💾 Guardar entrenamiento",type="primary"):
-        try:
-            s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
-            for order,b in enumerate(st.session_state.blocks,1):
-                ss=supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute().data[0]
-                rows=[{"sprint_set_id":ss["id"],"rep_number":n,"time_seconds":float(t) if t>0 else None} for n,t in enumerate(b["t"],1)]; supabase.table("sprint_reps").insert(rows).execute()
-            st.success("Entrenamiento guardado.")
-        except Exception as e: st.error(f"No se pudo guardar: {e}")
+        if completed_ok is None:
+            st.warning("Debes responder la pregunta de Finalización de entreno antes de guardar.")
+        elif completed_ok=="No" and reason is None:
+            st.warning("Debes indicar el motivo antes de guardar.")
+        else:
+            try:
+                s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
+                for order,b in enumerate(st.session_state.blocks,1):
+                    supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute()
+                st.session_state.pop("blocks",None); st.session_state.pop("health_completed_ok",None); st.session_state.pop("health_reason",None)
+                go_home_with_message("Entrenamiento guardado correctamente.")
+            except Exception as e: st.error(f"No se pudo guardar: {e}")
 
 
 def wellness(user):
@@ -153,7 +169,9 @@ def wellness(user):
     with st.form("wellness_form"):
         day=st.date_input("Fecha",date.today()); sleep=st.slider("Sueño",1,5,3); fatigue=st.slider("Fatiga",1,5,3); soreness=st.slider("Dolor muscular",1,5,3); stress=st.slider("Estrés",1,5,3); readiness=st.slider("Disposición para entrenar",1,5,3); notes=st.text_area("Comentarios"); save=st.form_submit_button("Guardar wellness",use_container_width=True)
     if save:
-        try: supabase.table("wellness_entries").upsert({"athlete_id":user.id,"entry_date":str(day),"sleep":sleep,"fatigue":fatigue,"muscle_soreness":soreness,"stress":stress,"readiness":readiness,"notes":notes or None},on_conflict="athlete_id,entry_date").execute(); st.success("Wellness guardado.")
+        try:
+            supabase.table("wellness_entries").upsert({"athlete_id":user.id,"entry_date":str(day),"sleep":sleep,"fatigue":fatigue,"muscle_soreness":soreness,"stress":stress,"readiness":readiness,"notes":notes or None},on_conflict="athlete_id,entry_date").execute()
+            go_home_with_message("Wellness guardado correctamente.")
         except Exception: st.error("Primero ejecuta db/002_add_wellness.sql en Supabase.")
 
 
@@ -163,7 +181,11 @@ def competition(user):
         day=st.date_input("Fecha",date.today()); name=st.text_input("Competición"); venue=st.text_input("Lugar"); a,b=st.columns(2); event=a.selectbox("Prueba",["60m","100m","200m","400m","4x100","other"]); rnd=b.selectbox("Ronda",["Serie","Semifinal","Final","Otra"]); a,b=st.columns(2); result=a.number_input("Marca (s)",0.0,120.0,0.0,0.01,format="%.3f"); wind=b.number_input("Viento (m/s)",-10.0,10.0,0.0,0.1,format="%.1f"); lane=st.number_input("Calle",1,9,4); reaction=st.number_input("Reacción (s, opcional)",0.0,2.0,0.0,0.001,format="%.3f"); position=st.number_input("Posición",1,99,1); notes=st.text_area("Comentarios"); save=st.form_submit_button("Guardar competición")
     if save:
         if not name or result<=0: st.warning("Introduce nombre y marca.")
-        else: supabase.table("competitions").insert({"athlete_id":user.id,"competition_date":str(day),"competition_name":name,"venue":venue or None,"event":event,"round":rnd,"lane":int(lane),"reaction_time":float(reaction) if reaction>0 else None,"result_seconds":float(result),"wind":float(wind),"position":int(position),"notes":notes or None}).execute(); st.success("Competición guardada.")
+        else:
+            try:
+                supabase.table("competitions").insert({"athlete_id":user.id,"competition_date":str(day),"competition_name":name,"venue":venue or None,"event":event,"round":rnd,"lane":int(lane),"reaction_time":float(reaction) if reaction>0 else None,"result_seconds":float(result),"wind":float(wind),"position":int(position),"notes":notes or None}).execute()
+                go_home_with_message("Competición guardada correctamente.")
+            except Exception as e: st.error(f"No se pudo guardar: {e}")
 
 
 def cycle(user,profile):
@@ -264,12 +286,12 @@ def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
 def _render_health_summary(sessions):
     if not sessions: st.info("Todavía no hay entrenamientos registrados."); return
     df=pd.DataFrame(sessions)
-    if "health_status" not in df.columns: st.info("Todavía no hay registros de salud en los entrenamientos."); return
+    if "health_status" not in df.columns: st.info("Todavía no hay registros de finalización de entreno."); return
     health=df[df["health_status"].notna()].copy()
-    if health.empty: st.info("Los entrenamientos anteriores todavía no tienen registro de salud."); return
+    if health.empty: st.info("Los entrenamientos anteriores todavía no tienen registro de finalización."); return
     health["estado"]=health["health_status"].map(HEALTH_LABELS)
     counts=health["estado"].value_counts().rename_axis("estado").reset_index(name="entrenamientos")
-    st.subheader("Registro de salud en entrenamientos")
+    st.subheader("Entrenamientos completados")
     c1,c2,c3=st.columns(3)
     c1.metric("Sin problemas",int((health["health_status"]=="completed_no_problem").sum()))
     c2.metric("Con problema o adaptado",int(health["health_status"].isin(["completed_with_health_problem","adapted_due_health_problem"]).sum()))
@@ -287,7 +309,7 @@ def coach_athlete_detail(user):
     wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120)
     comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100)
     cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
-    tabs=st.tabs(["Entrenamientos","Salud en entrenamientos","Series y tiempos","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
+    tabs=st.tabs(["Entrenamientos","Entrenamientos completados","Series","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
     with tabs[0]:
         if sessions:
             df=pd.DataFrame(sessions); df["estado_salud"]=df["health_status"].map(HEALTH_LABELS)
@@ -299,13 +321,12 @@ def coach_athlete_detail(user):
         else:
             session_ids=[x["id"] for x in sessions]
             try:
-                sets=supabase.table("sprint_sets").select("id,session_id,set_order,distance_m,repetitions,recovery_seconds").in_("session_id",session_ids).order("set_order").execute().data or []; set_ids=[x["id"] for x in sets]
-                reps=supabase.table("sprint_reps").select("sprint_set_id,rep_number,time_seconds").in_("sprint_set_id",set_ids).order("rep_number").execute().data if set_ids else []
-                date_by_session={x["id"]:x["session_date"] for x in sessions}; set_by_id={x["id"]:x for x in sets}; rows=[]
-                for r in reps or []:
-                    s=set_by_id.get(r["sprint_set_id"],{}); rows.append({"fecha":date_by_session.get(s.get("session_id")),"distancia_m":s.get("distance_m"),"serie":s.get("set_order"),"repetición":r.get("rep_number"),"tiempo_s":r.get("time_seconds"),"recuperación_s":s.get("recovery_seconds")})
+                sets=supabase.table("sprint_sets").select("session_id,set_order,distance_m,repetitions,recovery_seconds").in_("session_id",session_ids).order("set_order").execute().data or []
+                date_by_session={x["id"]:x["session_date"] for x in sessions}; rows=[]
+                for s in sets:
+                    rows.append({"fecha":date_by_session.get(s.get("session_id")),"distancia_m":s.get("distance_m"),"serie":s.get("set_order"),"repeticiones":s.get("repetitions"),"recuperación_s":s.get("recovery_seconds")})
                 if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-                else: st.info("No hay tiempos de repeticiones registrados.")
+                else: st.info("No hay series registradas.")
             except Exception as e: st.warning(f"No se pudieron cargar las series: {e}")
     with tabs[3]:
         if sessions:
