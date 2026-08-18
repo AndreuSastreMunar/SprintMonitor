@@ -23,9 +23,7 @@ HEALTH_LABELS={
     "not_completed_due_health_problem":"No completado por problemas de salud",
 }
 
-
 def get_profile(uid): return supabase.table("profiles").select("*").eq("id", uid).single().execute().data
-
 
 def sign_out():
     try: supabase.auth.sign_out()
@@ -33,12 +31,10 @@ def sign_out():
     for k in ["user","profile","view","blocks","selected_athlete"]: st.session_state.pop(k, None)
     st.rerun()
 
-
 def go_home_with_message(message):
     st.session_state.flash_message=message
     st.session_state.view="home"
     st.rerun()
-
 
 def login():
     if "user" in st.session_state: return st.session_state.user
@@ -59,21 +55,17 @@ def login():
             except Exception as e: st.error(f"No se pudo crear la cuenta: {e}")
     st.stop()
 
-
 def header(profile,label):
     name=(profile.get("full_name") or "Atleta").split()[0]
     st.markdown(f'<div class="hero"><div class="brand">SPRINT MONITOR</div><div class="hello">Hola, {name}</div><div class="sub">{profile.get("specialty") or "100 / 200 m"} · {label}</div></div>', unsafe_allow_html=True)
-
 
 def card(col,icon,title,subtitle,number,target,key):
     with col:
         st.markdown(f'<div class="menu-card"><div class="menu-icon">{icon}</div><div class="menu-title">{title}</div><div class="menu-sub">{subtitle}</div><div class="menu-num">{number}</div></div>',unsafe_allow_html=True)
         if st.button(f"Abrir {title}",key=key): st.session_state.view=target; st.rerun()
 
-
 def back(target="home",label="Volver al inicio"):
     if st.button(f"← {label}"): st.session_state.view=target; st.rerun()
-
 
 def _fixed_axis_chart(df, x_col, value_col, series_col=None, ymin=0, ymax=10, mark="line"):
     data=df.copy()
@@ -83,7 +75,6 @@ def _fixed_axis_chart(df, x_col, value_col, series_col=None, ymin=0, ymax=10, ma
     spec={"mark":{"type":mark,"point":True if mark=="line" else False},"encoding":enc,"data":{"values":data.to_dict("records")}}
     st.vega_lite_chart(spec,use_container_width=True)
 
-
 def _zero_floor_chart(df, x_col, value_col, series_col=None, mark="line"):
     data=df.copy()
     data[x_col]=pd.to_datetime(data[x_col]).dt.strftime("%Y-%m-%d") if pd.api.types.is_datetime64_any_dtype(data[x_col]) else data[x_col]
@@ -92,14 +83,12 @@ def _zero_floor_chart(df, x_col, value_col, series_col=None, mark="line"):
     spec={"mark":{"type":mark,"point":True if mark=="line" else False},"encoding":enc,"data":{"values":data.to_dict("records")}}
     st.vega_lite_chart(spec,use_container_width=True)
 
-
 def _period_label(df,date_col,period):
     x=df.copy(); x[date_col]=pd.to_datetime(x[date_col])
     if period=="Día": x["periodo"]=x[date_col].dt.floor("D")
     elif period=="Semana": x["periodo"]=x[date_col].dt.to_period("W").apply(lambda p:p.start_time)
     else: x["periodo"]=x[date_col].dt.to_period("M").apply(lambda p:p.start_time)
     return x
-
 
 def athlete_home(user,profile):
     if st.session_state.get("flash_message"):
@@ -115,7 +104,6 @@ def athlete_home(user,profile):
     if st.button("👤 Mi perfil"): st.session_state.view="profile"; st.rerun()
     if st.button("Cerrar sesión"): sign_out()
 
-
 def training(user):
     back(); st.title("🏃 Entrenamiento"); st.caption("RPE única para toda la sesión.")
     if "blocks" not in st.session_state: st.session_state.blocks=[{"d":60.0,"r":3,"rec":6.0}]
@@ -129,51 +117,31 @@ def training(user):
     st.session_state.blocks=updated
     if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"d":60.0,"r":1,"rec":5.0}); st.rerun()
     total=sum(b["d"]*b["r"] for b in st.session_state.blocks); st.info(f"Volumen total: **{total:.0f} m** · RPE: **{rpe:g}** · Carga: **{total*rpe:.0f} UA**")
-
     st.markdown("### Finalización de entreno")
     completed_ok=st.radio("¿Has podido completar todo el entrenamiento sin ningún problema de salud?",["Sí","No"],horizontal=True,index=None,key="health_completed_ok")
-    health_status=None
-    reason=None
-    if completed_ok=="Sí":
-        health_status="completed_no_problem"
+    health_status=None; reason=None
+    if completed_ok=="Sí": health_status="completed_no_problem"
     elif completed_ok=="No":
-        reason=st.radio("Indica el motivo",[
-            "He completado el entrenamiento con algún problema de salud.",
-            "He adaptado el entrenamiento debido a problemas de salud.",
-            "No he podido completar el entrenamiento debido a problemas de salud.",
-        ],index=None,key="health_reason")
+        reason=st.radio("Indica el motivo",["He completado el entrenamiento con algún problema de salud.","He adaptado el entrenamiento debido a problemas de salud.","No he podido completar el entrenamiento debido a problemas de salud."],index=None,key="health_reason")
         if reason:
-            health_status={
-                "He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem",
-                "He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem",
-                "No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem",
-            }[reason]
-
+            health_status={"He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem","He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem","No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem"}[reason]
     if st.button("💾 Guardar entrenamiento",type="primary"):
-        if completed_ok is None:
-            st.warning("Debes responder la pregunta de Finalización de entreno antes de guardar.")
-        elif completed_ok=="No" and reason is None:
-            st.warning("Debes indicar el motivo antes de guardar.")
+        if completed_ok is None: st.warning("Debes responder la pregunta de Finalización de entreno antes de guardar.")
+        elif completed_ok=="No" and reason is None: st.warning("Debes indicar el motivo antes de guardar.")
         else:
             try:
                 s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
-                for order,b in enumerate(st.session_state.blocks,1):
-                    supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute()
-                st.session_state.pop("blocks",None); st.session_state.pop("health_completed_ok",None); st.session_state.pop("health_reason",None)
-                go_home_with_message("Entrenamiento guardado correctamente.")
+                for order,b in enumerate(st.session_state.blocks,1): supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute()
+                st.session_state.pop("blocks",None); st.session_state.pop("health_completed_ok",None); st.session_state.pop("health_reason",None); go_home_with_message("Entrenamiento guardado correctamente.")
             except Exception as e: st.error(f"No se pudo guardar: {e}")
-
 
 def wellness(user):
     back(); st.title("❤️ Wellness")
     with st.form("wellness_form"):
         day=st.date_input("Fecha",date.today()); sleep=st.slider("Sueño",1,5,3); fatigue=st.slider("Fatiga",1,5,3); soreness=st.slider("Dolor muscular",1,5,3); stress=st.slider("Estrés",1,5,3); readiness=st.slider("Disposición para entrenar",1,5,3); notes=st.text_area("Comentarios"); save=st.form_submit_button("Guardar wellness",use_container_width=True)
     if save:
-        try:
-            supabase.table("wellness_entries").upsert({"athlete_id":user.id,"entry_date":str(day),"sleep":sleep,"fatigue":fatigue,"muscle_soreness":soreness,"stress":stress,"readiness":readiness,"notes":notes or None},on_conflict="athlete_id,entry_date").execute()
-            go_home_with_message("Wellness guardado correctamente.")
+        try: supabase.table("wellness_entries").upsert({"athlete_id":user.id,"entry_date":str(day),"sleep":sleep,"fatigue":fatigue,"muscle_soreness":soreness,"stress":stress,"readiness":readiness,"notes":notes or None},on_conflict="athlete_id,entry_date").execute(); go_home_with_message("Wellness guardado correctamente.")
         except Exception: st.error("Primero ejecuta db/002_add_wellness.sql en Supabase.")
-
 
 def competition(user):
     back(); st.title("🏆 Competición")
@@ -182,11 +150,8 @@ def competition(user):
     if save:
         if not name or result<=0: st.warning("Introduce nombre y marca.")
         else:
-            try:
-                supabase.table("competitions").insert({"athlete_id":user.id,"competition_date":str(day),"competition_name":name,"venue":venue or None,"event":event,"round":rnd,"lane":int(lane),"reaction_time":float(reaction) if reaction>0 else None,"result_seconds":float(result),"wind":float(wind),"position":int(position),"notes":notes or None}).execute()
-                go_home_with_message("Competición guardada correctamente.")
+            try: supabase.table("competitions").insert({"athlete_id":user.id,"competition_date":str(day),"competition_name":name,"venue":venue or None,"event":event,"round":rnd,"lane":int(lane),"reaction_time":float(reaction) if reaction>0 else None,"result_seconds":float(result),"wind":float(wind),"position":int(position),"notes":notes or None}).execute(); go_home_with_message("Competición guardada correctamente.")
             except Exception as e: st.error(f"No se pudo guardar: {e}")
-
 
 def cycle(user,profile):
     back(); st.title("🌸 Ciclo menstrual")
@@ -195,7 +160,6 @@ def cycle(user,profile):
     with st.form("cycle"):
         start=st.date_input("Inicio de la menstruación",date.today()); ended=st.checkbox("Ya ha finalizado"); end=st.date_input("Fin de la menstruación",date.today(),disabled=not ended); share=st.checkbox("Compartir este registro con mi entrenador",False); notes=st.text_area("Notas"); save=st.form_submit_button("Guardar ciclo")
     if save: supabase.table("menstrual_cycles").insert({"athlete_id":user.id,"start_date":str(start),"end_date":str(end) if ended else None,"share_with_coach":share,"notes":notes or None}).execute(); st.success("Registro guardado.")
-
 
 def _render_athlete_load(df,title,value_col,unit,aggregation,key,fixed_rpe=False):
     st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"athlete_period_{key}")
@@ -206,14 +170,12 @@ def _render_athlete_load(df,title,value_col,unit,aggregation,key,fixed_rpe=False
     st.dataframe(agg.rename(columns={"periodo":period,value_col:title}),use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
 
-
 def _render_single_wellness(df, metric, label, key_prefix="athlete"):
     period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"{key_prefix}_wellness_period_{metric}")
     x=_period_label(df,"entry_date",period); agg=x.groupby("periodo",as_index=False)[metric].mean().sort_values("periodo")
     _fixed_axis_chart(agg,"periodo",metric,ymin=1,ymax=5)
     st.dataframe(agg.rename(columns={"periodo":period,metric:label}),use_container_width=True,hide_index=True)
     st.caption(f"Media de {label.lower()} por {period.lower()} · Escala 1–5.")
-
 
 def _render_wellness_summary(rows):
     if not rows: st.info("Todavía no hay registros de wellness."); return
@@ -222,7 +184,6 @@ def _render_wellness_summary(rows):
     tabs=st.tabs([f"{icon} {WELLNESS_LABELS[m]}" for icon,m in zip(["😴","🔋","💪","🧠","✅"],WELLNESS_LABELS)])
     for tab,metric in zip(tabs,WELLNESS_LABELS):
         with tab: _render_single_wellness(df,metric,WELLNESS_LABELS[metric],"athlete")
-
 
 def evolution(user):
     back(); st.title("📈 Mi evolución")
@@ -256,13 +217,11 @@ def evolution(user):
             with c: _render_athlete_load(df,"Metros × RPE","srpe_load","UA","sum","load")
     with t3: _render_wellness_summary(wellness_rows)
 
-
 def profile_page(user,profile):
     back(); st.title("👤 Mi perfil"); opts=["100 m","200 m","100/200 m"]
     with st.form("profile"):
         name=st.text_input("Nombre y apellidos",profile.get("full_name") or ""); sex=st.selectbox("Sexo",["male","female"],index=1 if profile.get("sex")=="female" else 0,format_func=lambda x:"Mujer" if x=="female" else "Hombre"); current=profile.get("specialty") if profile.get("specialty") in opts else "100/200 m"; spec=st.selectbox("Especialidad",opts,index=opts.index(current)); save=st.form_submit_button("Guardar perfil")
     if save: supabase.table("profiles").update({"full_name":name,"sex":sex,"specialty":spec}).eq("id",user.id).execute(); st.session_state.profile=get_profile(user.id); st.success("Perfil actualizado."); st.rerun()
-
 
 def coach_athletes(user):
     back("home"); st.title("👥 Mis atletas"); st.caption("Selecciona un atleta para abrir su ficha completa.")
@@ -273,7 +232,6 @@ def coach_athletes(user):
             st.markdown(f"### {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m")
             if st.button("Ver ficha del atleta",key=f"athlete_{a['id']}"): st.session_state.selected_athlete=a; st.session_state.view="coach_athlete_detail"; st.rerun()
 
-
 def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
     try:
         q=supabase.table(table).select(select).eq("athlete_id",athlete_id)
@@ -281,7 +239,6 @@ def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
         if order: q=q.order(order)
         return q.limit(limit).execute().data or []
     except Exception: return []
-
 
 def _render_health_summary(sessions):
     if not sessions: st.info("Todavía no hay entrenamientos registrados."); return
@@ -300,12 +257,11 @@ def _render_health_summary(sessions):
     cols=[c for c in ["session_date","volume_m","rpe","estado","notes"] if c in health.columns]
     st.dataframe(health[cols].sort_values("session_date",ascending=False),use_container_width=True,hide_index=True)
 
-
 def coach_athlete_detail(user):
     back("coach_athletes","Volver a Mis atletas"); a=st.session_state.get("selected_athlete")
     if not a: st.session_state.view="coach_athletes"; st.rerun()
     st.title(f"👤 {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m"); aid=a["id"]
-    sessions=safe_query("training_sessions","id,session_date,duration_minutes,volume_m,rpe,srpe_load,health_status,notes",aid,"session_date",120)
+    sessions=safe_query("training_sessions","id,session_date,volume_m,rpe,srpe_load,health_status,notes",aid,"session_date",120)
     wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120)
     comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100)
     cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
@@ -313,7 +269,7 @@ def coach_athlete_detail(user):
     with tabs[0]:
         if sessions:
             df=pd.DataFrame(sessions); df["estado_salud"]=df["health_status"].map(HEALTH_LABELS)
-            st.dataframe(df[[c for c in ["session_date","volume_m","duration_minutes","rpe","srpe_load","estado_salud","notes"] if c in df.columns]],use_container_width=True,hide_index=True)
+            st.dataframe(df[[c for c in ["session_date","volume_m","rpe","srpe_load","estado_salud","notes"] if c in df.columns]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay entrenamientos registrados.")
     with tabs[1]: _render_health_summary(sessions)
     with tabs[2]:
@@ -323,8 +279,7 @@ def coach_athlete_detail(user):
             try:
                 sets=supabase.table("sprint_sets").select("session_id,set_order,distance_m,repetitions,recovery_seconds").in_("session_id",session_ids).order("set_order").execute().data or []
                 date_by_session={x["id"]:x["session_date"] for x in sessions}; rows=[]
-                for s in sets:
-                    rows.append({"fecha":date_by_session.get(s.get("session_id")),"distancia_m":s.get("distance_m"),"serie":s.get("set_order"),"repeticiones":s.get("repetitions"),"recuperación_s":s.get("recovery_seconds")})
+                for s in sets: rows.append({"fecha":date_by_session.get(s.get("session_id")),"distancia_m":s.get("distance_m"),"serie":s.get("set_order"),"repeticiones":s.get("repetitions"),"recuperación_s":s.get("recovery_seconds")})
                 if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 else: st.info("No hay series registradas.")
             except Exception as e: st.warning(f"No se pudieron cargar las series: {e}")
@@ -349,11 +304,9 @@ def coach_athlete_detail(user):
                 edf=cdf[cdf["event"]==event].set_index("competition_date"); st.caption(str(event)); st.line_chart(edf[["result_seconds"]])
         if not sessions and not comps: st.info("Todavía no hay datos suficientes para mostrar evolución.")
 
-
 def _period_series(df, value_col, period, aggregation):
     x=_period_label(df,"session_date",period)
     return x.pivot_table(index="periodo",columns="atleta",values=value_col,aggfunc=aggregation,fill_value=0).sort_index()
-
 
 def _render_group_metric(df,title,value_col,unit,aggregation,key):
     st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"period_{key}")
@@ -365,29 +318,20 @@ def _render_group_metric(df,title,value_col,unit,aggregation,key):
     else: st.line_chart(series)
     table=series.reset_index().rename(columns={"periodo":period}); st.dataframe(table,use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
-    if aggregation=="mean": comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:"valor"})
-    else: comparison=df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:"valor"})
+    comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:"valor"}) if aggregation=="mean" else df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:"valor"})
     comparison=comparison.sort_values("valor",ascending=False); st.markdown("**Comparativa del grupo**")
     if value_col=="rpe": _fixed_axis_chart(comparison,"atleta","valor",ymin=0,ymax=10,mark="bar")
     elif value_col=="volume_m": _zero_floor_chart(comparison,"atleta","valor",mark="bar")
     else: st.bar_chart(comparison.set_index("atleta")[["valor"]])
     st.dataframe(comparison.rename(columns={"valor":title}),use_container_width=True,hide_index=True)
 
-
 def _render_group_wellness_metric(df,metric,label):
     period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"coach_wellness_period_{metric}")
-    x=_period_label(df,"entry_date",period)
-    series=x.pivot_table(index="periodo",columns="atleta",values=metric,aggfunc="mean").sort_index()
+    x=_period_label(df,"entry_date",period); series=x.pivot_table(index="periodo",columns="atleta",values=metric,aggfunc="mean").sort_index()
     if series.empty: st.info("No hay datos para este periodo."); return
-    long=series.reset_index().melt(id_vars="periodo",var_name="atleta",value_name="valor").dropna(subset=["valor"])
-    _fixed_axis_chart(long,"periodo","valor","atleta",1,5)
+    long=series.reset_index().melt(id_vars="periodo",var_name="atleta",value_name="valor").dropna(subset=["valor"]); _fixed_axis_chart(long,"periodo","valor","atleta",1,5)
     st.dataframe(series.reset_index().rename(columns={"periodo":period}),use_container_width=True,hide_index=True)
-    comparison=df.groupby("atleta",as_index=False)[metric].mean().rename(columns={metric:"valor"}).dropna(subset=["valor"]).sort_values("valor",ascending=False)
-    st.markdown("**Comparativa del grupo**")
-    _fixed_axis_chart(comparison,"atleta","valor",ymin=1,ymax=5,mark="bar")
-    st.dataframe(comparison.rename(columns={"valor":label}),use_container_width=True,hide_index=True)
-    st.caption(f"Media de {label.lower()} · Escala 1–5.")
-
+    comparison=df.groupby("atleta",as_index=False)[metric].mean().rename(columns={metric:"valor"}).dropna(subset=["valor"]).sort_values("valor",ascending=False); st.markdown("**Comparativa del grupo**"); _fixed_axis_chart(comparison,"atleta","valor",ymin=1,ymax=5,mark="bar"); st.dataframe(comparison.rename(columns={"valor":label}),use_container_width=True,hide_index=True); st.caption(f"Media de {label.lower()} · Escala 1–5.")
 
 def _render_group_wellness(rows,names):
     if not rows: st.info("Todavía no hay registros de bienestar del grupo."); return
@@ -396,7 +340,6 @@ def _render_group_wellness(rows,names):
     tabs=st.tabs([f"{icon} {WELLNESS_LABELS[m]}" for icon,m in zip(["😴","🔋","💪","🧠","✅"],WELLNESS_LABELS)])
     for tab,metric in zip(tabs,WELLNESS_LABELS):
         with tab: _render_group_wellness_metric(df,metric,WELLNESS_LABELS[metric])
-
 
 def coach_group_load(user):
     back("home"); st.title("📊 Carga y bienestar del grupo"); st.caption("Analiza carga y bienestar por día, semana o mes y compara a los atletas del grupo.")
@@ -420,11 +363,9 @@ def coach_group_load(user):
         with t3: st.info("Todavía no hay entrenamientos del grupo.")
     with t4: _render_group_wellness(wellness_rows,names)
 
-
 def coach_home(user,profile):
     header(profile,"ENTRENADOR"); c1,c2=st.columns(2); card(c1,"👥","Mis atletas","Consulta el grupo",1,"coach_athletes","coach_m1"); card(c2,"📊","Carga del grupo","Carga y bienestar",2,"coach_group_load","coach_m2"); st.divider()
     if st.button("Cerrar sesión"): sign_out()
-
 
 user=login()
 if "profile" not in st.session_state: st.session_state.profile=get_profile(user.id)
