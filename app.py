@@ -265,7 +265,7 @@ def coach_athlete_detail(user):
     wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120)
     comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100)
     cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
-    tabs=st.tabs(["Entrenamientos","Entrenamientos completados","Series","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
+    tabs=st.tabs(["Entrenamientos","Entrenamientos completados","Series","RPE","Wellness","Competiciones","Ciclo compartido","Carga"])
     with tabs[0]:
         if sessions:
             df=pd.DataFrame(sessions); df["estado_salud"]=df["health_status"].map(HEALTH_LABELS)
@@ -296,13 +296,15 @@ def coach_athlete_detail(user):
         elif cycles: st.dataframe(pd.DataFrame(cycles)[["start_date","end_date","notes"]],use_container_width=True,hide_index=True)
         else: st.info("No hay registros del ciclo compartidos con el entrenador.")
     with tabs[7]:
-        if sessions:
-            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna (metros × RPE)"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
-        if comps:
-            cdf=pd.DataFrame(comps); cdf["competition_date"]=pd.to_datetime(cdf["competition_date"]); st.subheader("Marcas de competición")
-            for event in cdf["event"].dropna().unique():
-                edf=cdf[cdf["event"]==event].set_index("competition_date"); st.caption(str(event)); st.line_chart(edf[["result_seconds"]])
-        if not sessions and not comps: st.info("Todavía no hay datos suficientes para mostrar evolución.")
+        if not sessions:
+            st.info("Todavía no hay entrenamientos registrados.")
+        else:
+            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"])
+            for col in ["volume_m","rpe","srpe_load"]: df[col]=pd.to_numeric(df[col],errors="coerce").fillna(0)
+            m_tab,r_tab,l_tab=st.tabs(["📏 Metros","🎯 RPE","⚡ Metros × RPE"])
+            with m_tab: _render_athlete_load(df,"Metros","volume_m","m","sum","coach_detail_meters")
+            with r_tab: _render_athlete_load(df,"RPE","rpe","0–10","mean","coach_detail_rpe",True)
+            with l_tab: _render_athlete_load(df,"Metros × RPE","srpe_load","UA","sum","coach_detail_load")
 
 def _period_series(df, value_col, period, aggregation):
     x=_period_label(df,"session_date",period)
