@@ -165,8 +165,7 @@ def _render_athlete_load(df,title,value_col,unit,aggregation,key,fixed_rpe=False
     st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"athlete_period_{key}")
     x=_period_label(df,"session_date",period); agg=x.groupby("periodo",as_index=False)[value_col].agg(aggregation).sort_values("periodo")
     if fixed_rpe: _fixed_axis_chart(agg,"periodo",value_col,ymin=0,ymax=10)
-    elif value_col=="volume_m": _zero_floor_chart(agg,"periodo",value_col)
-    else: st.line_chart(agg.set_index("periodo")[[value_col]])
+    else: _zero_floor_chart(agg,"periodo",value_col)
     st.dataframe(agg.rename(columns={"periodo":period,value_col:title}),use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
 
@@ -253,7 +252,7 @@ def _render_health_summary(sessions):
     c1.metric("Sin problemas",int((health["health_status"]=="completed_no_problem").sum()))
     c2.metric("Con problema o adaptado",int(health["health_status"].isin(["completed_with_health_problem","adapted_due_health_problem"]).sum()))
     c3.metric("No completados",int((health["health_status"]=="not_completed_due_health_problem").sum()))
-    st.bar_chart(counts.set_index("estado")[["entrenamientos"]])
+    _zero_floor_chart(counts,"estado","entrenamientos",mark="bar")
     cols=[c for c in ["session_date","volume_m","rpe","estado","notes"] if c in health.columns]
     st.dataframe(health[cols].sort_values("session_date",ascending=False),use_container_width=True,hide_index=True)
 
@@ -316,15 +315,13 @@ def _render_group_metric(df,title,value_col,unit,aggregation,key):
     if series.empty: st.info("No hay datos para este periodo."); return
     long=series.reset_index().melt(id_vars="periodo",var_name="atleta",value_name="valor")
     if value_col=="rpe": _fixed_axis_chart(long,"periodo","valor","atleta",0,10)
-    elif value_col=="volume_m": _zero_floor_chart(long,"periodo","valor","atleta")
-    else: st.line_chart(series)
+    else: _zero_floor_chart(long,"periodo","valor","atleta")
     table=series.reset_index().rename(columns={"periodo":period}); st.dataframe(table,use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
     comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:"valor"}) if aggregation=="mean" else df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:"valor"})
     comparison=comparison.sort_values("valor",ascending=False); st.markdown("**Comparativa del grupo**")
     if value_col=="rpe": _fixed_axis_chart(comparison,"atleta","valor",ymin=0,ymax=10,mark="bar")
-    elif value_col=="volume_m": _zero_floor_chart(comparison,"atleta","valor",mark="bar")
-    else: st.bar_chart(comparison.set_index("atleta")[["valor"]])
+    else: _zero_floor_chart(comparison,"atleta","valor",mark="bar")
     st.dataframe(comparison.rename(columns={"valor":title}),use_container_width=True,hide_index=True)
 
 def _render_group_wellness_metric(df,metric,label):
