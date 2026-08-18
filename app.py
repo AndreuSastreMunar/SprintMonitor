@@ -72,6 +72,15 @@ def _fixed_axis_chart(df, x_col, value_col, series_col=None, ymin=0, ymax=10, ma
     st.vega_lite_chart(spec,use_container_width=True)
 
 
+def _zero_floor_chart(df, x_col, value_col, series_col=None, mark="line"):
+    data=df.copy()
+    data[x_col]=pd.to_datetime(data[x_col]).dt.strftime("%Y-%m-%d") if pd.api.types.is_datetime64_any_dtype(data[x_col]) else data[x_col]
+    enc={"x":{"field":x_col,"type":"temporal" if x_col in ["periodo","session_date","entry_date"] else "nominal","title":None},"y":{"field":value_col,"type":"quantitative","scale":{"domainMin":0},"title":None}}
+    if series_col: enc["color"]={"field":series_col,"type":"nominal","title":None}
+    spec={"mark":{"type":mark,"point":True if mark=="line" else False},"encoding":enc,"data":{"values":data.to_dict("records")}}
+    st.vega_lite_chart(spec,use_container_width=True)
+
+
 def _period_label(df,date_col,period):
     x=df.copy(); x[date_col]=pd.to_datetime(x[date_col])
     if period=="Día": x["periodo"]=x[date_col].dt.floor("D")
@@ -148,6 +157,7 @@ def _render_athlete_load(df,title,value_col,unit,aggregation,key,fixed_rpe=False
     st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"athlete_period_{key}")
     x=_period_label(df,"session_date",period); agg=x.groupby("periodo",as_index=False)[value_col].agg(aggregation).sort_values("periodo")
     if fixed_rpe: _fixed_axis_chart(agg,"periodo",value_col,ymin=0,ymax=10)
+    elif value_col=="volume_m": _zero_floor_chart(agg,"periodo",value_col)
     else: st.line_chart(agg.set_index("periodo")[[value_col]])
     st.dataframe(agg.rename(columns={"periodo":period,value_col:title}),use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
@@ -289,6 +299,7 @@ def _render_group_metric(df,title,value_col,unit,aggregation,key):
     if series.empty: st.info("No hay datos para este periodo."); return
     long=series.reset_index().melt(id_vars="periodo",var_name="atleta",value_name="valor")
     if value_col=="rpe": _fixed_axis_chart(long,"periodo","valor","atleta",0,10)
+    elif value_col=="volume_m": _zero_floor_chart(long,"periodo","valor","atleta")
     else: st.line_chart(series)
     table=series.reset_index().rename(columns={"periodo":period}); st.dataframe(table,use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
@@ -296,6 +307,7 @@ def _render_group_metric(df,title,value_col,unit,aggregation,key):
     else: comparison=df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:"valor"})
     comparison=comparison.sort_values("valor",ascending=False); st.markdown("**Comparativa del grupo**")
     if value_col=="rpe": _fixed_axis_chart(comparison,"atleta","valor",ymin=0,ymax=10,mark="bar")
+    elif value_col=="volume_m": _zero_floor_chart(comparison,"atleta","valor",mark="bar")
     else: st.bar_chart(comparison.set_index("atleta")[["valor"]])
     st.dataframe(comparison.rename(columns={"valor":title}),use_container_width=True,hide_index=True)
 
