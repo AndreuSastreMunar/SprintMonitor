@@ -55,14 +55,29 @@ def card(col,icon,title,subtitle,number,target,key):
 def back(target="home",label="Volver al inicio"):
     if st.button(f"← {label}"): st.session_state.view=target; st.rerun()
 
+def _fixed_axis_chart(df, x_col, value_col, series_col=None, ymin=0, ymax=10, mark="line"):
+    data=df.copy()
+    data[x_col]=pd.to_datetime(data[x_col]).dt.strftime("%Y-%m-%d") if pd.api.types.is_datetime64_any_dtype(data[x_col]) else data[x_col]
+    enc={"x":{"field":x_col,"type":"temporal" if x_col in ["periodo","session_date","entry_date"] else "nominal","title":None},"y":{"field":value_col,"type":"quantitative","scale":{"domain":[ymin,ymax]},"title":None}}
+    if series_col: enc["color"]={"field":series_col,"type":"nominal","title":None}
+    spec={"mark":{"type":mark,"point":True if mark=="line" else False},"encoding":enc,"data":{"values":data.to_dict("records")}}
+    st.vega_lite_chart(spec,use_container_width=True)
+
+def _period_label(df,date_col,period):
+    x=df.copy(); x[date_col]=pd.to_datetime(x[date_col])
+    if period=="Día": x["periodo"]=x[date_col].dt.floor("D")
+    elif period=="Semana": x["periodo"]=x[date_col].dt.to_period("W").apply(lambda p:p.start_time)
+    else: x["periodo"]=x[date_col].dt.to_period("M").apply(lambda p:p.start_time)
+    return x
+
 def athlete_home(user,profile):
     header(profile,"ATLETA"); c1,c2=st.columns(2); card(c1,"🏃","Entrenamiento","Series, tiempos y RPE",1,"training","m1"); card(c2,"❤️","Wellness","Cómo te encuentras hoy",2,"wellness","m2")
     if profile.get("sex")=="female":
-        c3,c4=st.columns(2); card(c3,"🌸","Ciclo menstrual","Registro privado",3,"cycle","m3"); card(c4,"🏆","Competición","100 m y 200 m",4,"competition","m4")
-        st.markdown('<div class="menu-card"><div class="menu-icon">📈</div><div class="menu-title">Mi evolución</div><div class="menu-sub">Tiempos, carga y competiciones</div><div class="menu-num">5</div></div>',unsafe_allow_html=True)
+        c3,c4=st.columns(2); card(c3,"🌸","Ciclo menstrual","Registro privado",3,"cycle","m3"); card(c4,"🏆","Competición","60, 100, 200 y 400 m",4,"competition","m4")
+        st.markdown('<div class="menu-card"><div class="menu-icon">📈</div><div class="menu-title">Mi evolución</div><div class="menu-sub">Marcas, carga y bienestar</div><div class="menu-num">5</div></div>',unsafe_allow_html=True)
         if st.button("Abrir Mi evolución",key="m5"): st.session_state.view="evolution"; st.rerun()
     else:
-        c3,c4=st.columns(2); card(c3,"🏆","Competición","100 m y 200 m",3,"competition","m3m"); card(c4,"📈","Mi evolución","Tiempos, carga y competiciones",4,"evolution","m4m")
+        c3,c4=st.columns(2); card(c3,"🏆","Competición","60, 100, 200 y 400 m",3,"competition","m3m"); card(c4,"📈","Mi evolución","Marcas, carga y bienestar",4,"evolution","m4m")
     st.divider()
     if st.button("👤 Mi perfil"): st.session_state.view="profile"; st.rerun()
     if st.button("Cerrar sesión"): sign_out()
@@ -101,7 +116,7 @@ def wellness(user):
 def competition(user):
     back(); st.title("🏆 Competición")
     with st.form("comp"):
-        day=st.date_input("Fecha",date.today()); name=st.text_input("Competición"); venue=st.text_input("Lugar"); a,b=st.columns(2); event=a.selectbox("Prueba",["100m","200m","4x100","other"]); rnd=b.selectbox("Ronda",["Serie","Semifinal","Final","Otra"]); a,b=st.columns(2); result=a.number_input("Marca (s)",0.0,60.0,0.0,0.01,format="%.3f"); wind=b.number_input("Viento (m/s)",-10.0,10.0,0.0,0.1,format="%.1f"); lane=st.number_input("Calle",1,9,4); reaction=st.number_input("Reacción (s, opcional)",0.0,2.0,0.0,0.001,format="%.3f"); position=st.number_input("Posición",1,99,1); notes=st.text_area("Comentarios"); save=st.form_submit_button("Guardar competición")
+        day=st.date_input("Fecha",date.today()); name=st.text_input("Competición"); venue=st.text_input("Lugar"); a,b=st.columns(2); event=a.selectbox("Prueba",["60m","100m","200m","400m","4x100","other"]); rnd=b.selectbox("Ronda",["Serie","Semifinal","Final","Otra"]); a,b=st.columns(2); result=a.number_input("Marca (s)",0.0,120.0,0.0,0.01,format="%.3f"); wind=b.number_input("Viento (m/s)",-10.0,10.0,0.0,0.1,format="%.1f"); lane=st.number_input("Calle",1,9,4); reaction=st.number_input("Reacción (s, opcional)",0.0,2.0,0.0,0.001,format="%.3f"); position=st.number_input("Posición",1,99,1); notes=st.text_area("Comentarios"); save=st.form_submit_button("Guardar competición")
     if save:
         if not name or result<=0: st.warning("Introduce nombre y marca.")
         else: supabase.table("competitions").insert({"athlete_id":user.id,"competition_date":str(day),"competition_name":name,"venue":venue or None,"event":event,"round":rnd,"lane":int(lane),"reaction_time":float(reaction) if reaction>0 else None,"result_seconds":float(result),"wind":float(wind),"position":int(position),"notes":notes or None}).execute(); st.success("Competición guardada.")
@@ -114,12 +129,58 @@ def cycle(user,profile):
         start=st.date_input("Inicio de la menstruación",date.today()); ended=st.checkbox("Ya ha finalizado"); end=st.date_input("Fin de la menstruación",date.today(),disabled=not ended); share=st.checkbox("Compartir este registro con mi entrenador",False); notes=st.text_area("Notas"); save=st.form_submit_button("Guardar ciclo")
     if save: supabase.table("menstrual_cycles").insert({"athlete_id":user.id,"start_date":str(start),"end_date":str(end) if ended else None,"share_with_coach":share,"notes":notes or None}).execute(); st.success("Registro guardado.")
 
+def _render_athlete_load(df,title,value_col,unit,aggregation,key,fixed_rpe=False):
+    st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"athlete_period_{key}")
+    x=_period_label(df,"session_date",period)
+    agg=x.groupby("periodo",as_index=False)[value_col].agg(aggregation).sort_values("periodo")
+    if fixed_rpe: _fixed_axis_chart(agg,"periodo",value_col,ymin=0,ymax=10)
+    else: st.line_chart(agg.set_index("periodo")[[value_col]])
+    st.dataframe(agg.rename(columns={"periodo":period,value_col:title}),use_container_width=True,hide_index=True)
+    st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
+
+def _render_wellness_summary(rows):
+    if not rows: st.info("Todavía no hay registros de wellness."); return
+    df=pd.DataFrame(rows); df["entry_date"]=pd.to_datetime(df["entry_date"])
+    labels={"sleep":"Sueño","fatigue":"Fatiga","muscle_soreness":"Dolor muscular","stress":"Estrés","readiness":"Disposición para entrenar"}
+    period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key="wellness_period")
+    x=_period_label(df,"entry_date",period); metrics=list(labels)
+    agg=x.groupby("periodo",as_index=False)[metrics].mean().sort_values("periodo"); long=agg.melt(id_vars="periodo",value_vars=metrics,var_name="métrica",value_name="media"); long["métrica"]=long["métrica"].map(labels)
+    _fixed_axis_chart(long,"periodo","media","métrica",1,5)
+    display=agg.rename(columns={"periodo":period,**labels}); st.dataframe(display,use_container_width=True,hide_index=True)
+    st.caption("Media de cada indicador de bienestar. Escala 1–5.")
+
 def evolution(user):
-    back(); st.title("📈 Mi evolución"); sessions=supabase.table("training_sessions").select("session_date,volume_m,rpe,srpe_load").eq("athlete_id",user.id).order("session_date").limit(60).execute().data; comps=supabase.table("competitions").select("competition_date,event,result_seconds,wind,competition_name").eq("athlete_id",user.id).order("competition_date").limit(40).execute().data
-    if sessions:
-        df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna (metros × RPE)"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
-    else: st.info("Todavía no hay entrenamientos.")
-    if comps: st.subheader("Competiciones"); st.dataframe(pd.DataFrame(comps),use_container_width=True,hide_index=True)
+    back(); st.title("📈 Mi evolución")
+    sessions=supabase.table("training_sessions").select("session_date,volume_m,rpe,srpe_load").eq("athlete_id",user.id).order("session_date").limit(500).execute().data or []
+    comps=supabase.table("competitions").select("competition_date,event,result_seconds,wind,competition_name").eq("athlete_id",user.id).order("competition_date").limit(200).execute().data or []
+    try: wellness_rows=supabase.table("wellness_entries").select("entry_date,sleep,fatigue,muscle_soreness,stress,readiness").eq("athlete_id",user.id).order("entry_date").limit(500).execute().data or []
+    except Exception: wellness_rows=[]
+    t1,t2,t3=st.tabs(["🏅 Mejor marca","📊 Carga","❤️ Bienestar"])
+    with t1:
+        st.subheader("Mejor marca de la temporada")
+        if not comps: st.info("Todavía no hay competiciones registradas.")
+        else:
+            cdf=pd.DataFrame(comps); cdf["competition_date"]=pd.to_datetime(cdf["competition_date"]); years=sorted(cdf["competition_date"].dt.year.dropna().unique().tolist(),reverse=True); season=st.selectbox("Temporada",years,index=0)
+            season_df=cdf[cdf["competition_date"].dt.year==season]
+            cols=st.columns(2); events=["60m","100m","200m","400m"]
+            for i,event in enumerate(events):
+                edf=season_df[(season_df["event"]==event)&(pd.to_numeric(season_df["result_seconds"],errors="coerce")>0)].copy()
+                with cols[i%2]:
+                    with st.container(border=True):
+                        st.markdown(f"### {event.replace('m',' m')}")
+                        if edf.empty: st.caption("Sin marca registrada")
+                        else:
+                            best=edf.loc[pd.to_numeric(edf["result_seconds"],errors="coerce").idxmin()]; st.metric("Mejor marca",f"{float(best['result_seconds']):.3f} s"); st.caption(f"{best['competition_date'].date()} · {best.get('competition_name') or ''}")
+    with t2:
+        if not sessions: st.info("Todavía no hay entrenamientos.")
+        else:
+            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"])
+            for c in ["volume_m","rpe","srpe_load"]: df[c]=pd.to_numeric(df[c],errors="coerce").fillna(0)
+            a,b,c=st.tabs(["📏 Metros","🎯 RPE","⚡ Metros × RPE"])
+            with a: _render_athlete_load(df,"Metros","volume_m","m","sum","meters")
+            with b: _render_athlete_load(df,"RPE","rpe","0–10","mean","rpe",True)
+            with c: _render_athlete_load(df,"Metros × RPE","srpe_load","UA","sum","load")
+    with t3: _render_wellness_summary(wellness_rows)
 
 def profile_page(user,profile):
     back(); st.title("👤 Mi perfil"); opts=["100 m","200 m","100/200 m"]
@@ -172,7 +233,7 @@ def coach_athlete_detail(user):
             except Exception as e: st.warning(f"No se pudieron cargar las series: {e}")
     with tabs[2]:
         if sessions:
-            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.line_chart(df.set_index("session_date")[["rpe"]]); st.dataframe(df[["session_date","volume_m","rpe","srpe_load"]],use_container_width=True,hide_index=True)
+            df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); _fixed_axis_chart(df,"session_date","rpe",ymin=0,ymax=10); st.dataframe(df[["session_date","volume_m","rpe","srpe_load"]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay datos de RPE.")
     with tabs[3]:
         if wellness_rows:
@@ -195,24 +256,24 @@ def coach_athlete_detail(user):
         if not sessions and not comps: st.info("Todavía no hay datos suficientes para mostrar evolución.")
 
 def _period_series(df, value_col, period, aggregation):
-    x=df.copy()
-    if period=="Día": x["periodo"]=x["session_date"].dt.floor("D")
-    elif period=="Semana": x["periodo"]=x["session_date"].dt.to_period("W").apply(lambda p:p.start_time)
-    else: x["periodo"]=x["session_date"].dt.to_period("M").apply(lambda p:p.start_time)
+    x=_period_label(df,"session_date",period)
     return x.pivot_table(index="periodo",columns="atleta",values=value_col,aggfunc=aggregation,fill_value=0).sort_index()
 
 def _render_group_metric(df,title,value_col,unit,aggregation,key):
-    st.subheader(title)
-    period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"period_{key}")
+    st.subheader(title); period=st.radio("Ver por",["Día","Semana","Mes"],horizontal=True,key=f"period_{key}")
     series=_period_series(df,value_col,period,aggregation)
     if series.empty: st.info("No hay datos para este periodo."); return
-    st.line_chart(series)
-    table=series.reset_index().rename(columns={"periodo":period})
-    st.dataframe(table,use_container_width=True,hide_index=True)
+    long=series.reset_index().melt(id_vars="periodo",var_name="atleta",value_name="valor")
+    if value_col=="rpe": _fixed_axis_chart(long,"periodo","valor","atleta",0,10)
+    else: st.line_chart(series)
+    table=series.reset_index().rename(columns={"periodo":period}); st.dataframe(table,use_container_width=True,hide_index=True)
     st.caption(f"{period}: {'media' if aggregation=='mean' else 'suma'} · Unidad: {unit}")
-    if aggregation=="mean": comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:f"{title.lower()}_medio"})
-    else: comparison=df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:f"{title.lower()}_total"})
-    comparison=comparison.sort_values(comparison.columns[-1],ascending=False); st.markdown("**Comparativa del grupo**"); st.bar_chart(comparison.set_index("atleta")); st.dataframe(comparison,use_container_width=True,hide_index=True)
+    if aggregation=="mean": comparison=df.groupby("atleta",as_index=False)[value_col].mean().rename(columns={value_col:"valor"})
+    else: comparison=df.groupby("atleta",as_index=False)[value_col].sum().rename(columns={value_col:"valor"})
+    comparison=comparison.sort_values("valor",ascending=False); st.markdown("**Comparativa del grupo**")
+    if value_col=="rpe": _fixed_axis_chart(comparison,"atleta","valor",ymin=0,ymax=10,mark="bar")
+    else: st.bar_chart(comparison.set_index("atleta")[["valor"]])
+    st.dataframe(comparison.rename(columns={"valor":title}),use_container_width=True,hide_index=True)
 
 def coach_group_load(user):
     back("home"); st.title("📊 Carga del grupo"); st.caption("Elige qué variable quieres analizar y después visualízala por día, semana o mes.")
