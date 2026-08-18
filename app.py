@@ -16,6 +16,12 @@ st.markdown("""
 
 supabase = get_supabase()
 WELLNESS_LABELS={"sleep":"Sueño","fatigue":"Fatiga","muscle_soreness":"Dolor muscular","stress":"Estrés","readiness":"Disposición para entrenar"}
+HEALTH_LABELS={
+    "completed_no_problem":"Completado sin problemas de salud",
+    "completed_with_health_problem":"Completado con algún problema de salud",
+    "adapted_due_health_problem":"Adaptado por problemas de salud",
+    "not_completed_due_health_problem":"No completado por problemas de salud",
+}
 
 
 def get_profile(uid): return supabase.table("profiles").select("*").eq("id", uid).single().execute().data
@@ -116,9 +122,25 @@ def training(user):
     st.session_state.blocks=updated
     if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"d":60.0,"r":1,"rec":5.0,"t":[0.0]}); st.rerun()
     total=sum(b["d"]*b["r"] for b in st.session_state.blocks); st.info(f"Volumen total: **{total:.0f} m** · RPE: **{rpe:g}** · Carga: **{total*rpe:.0f} UA**")
+
+    st.markdown("### Estado de salud al finalizar")
+    completed_ok=st.radio("¿Has podido completar todo el entrenamiento sin ningún problema de salud?",["Sí","No"],horizontal=True,key="health_completed_ok")
+    health_status="completed_no_problem"
+    if completed_ok=="No":
+        reason=st.radio("Indica el motivo",[
+            "He completado el entrenamiento con algún problema de salud.",
+            "He adaptado el entrenamiento debido a problemas de salud.",
+            "No he podido completar el entrenamiento debido a problemas de salud.",
+        ],key="health_reason")
+        health_status={
+            "He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem",
+            "He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem",
+            "No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem",
+        }[reason]
+
     if st.button("💾 Guardar entrenamiento",type="primary"):
         try:
-            s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"notes":notes or None}).execute().data[0]
+            s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
             for order,b in enumerate(st.session_state.blocks,1):
                 ss=supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute().data[0]
                 rows=[{"sprint_set_id":ss["id"],"rep_number":n,"time_seconds":float(t) if t>0 else None} for n,t in enumerate(b["t"],1)]; supabase.table("sprint_reps").insert(rows).execute()
@@ -174,8 +196,7 @@ def _render_single_wellness(df, metric, label, key_prefix="athlete"):
 def _render_wellness_summary(rows):
     if not rows: st.info("Todavía no hay registros de wellness."); return
     df=pd.DataFrame(rows); df["entry_date"]=pd.to_datetime(df["entry_date"])
-    for metric in WELLNESS_LABELS:
-        df[metric]=pd.to_numeric(df[metric],errors="coerce")
+    for metric in WELLNESS_LABELS: df[metric]=pd.to_numeric(df[metric],errors="coerce")
     tabs=st.tabs([f"{icon} {WELLNESS_LABELS[m]}" for icon,m in zip(["😴","🔋","💪","🧠","✅"],WELLNESS_LABELS)])
     for tab,metric in zip(tabs,WELLNESS_LABELS):
         with tab: _render_single_wellness(df,metric,WELLNESS_LABELS[metric],"athlete")
@@ -221,7 +242,6 @@ def profile_page(user,profile):
     if save: supabase.table("profiles").update({"full_name":name,"sex":sex,"specialty":spec}).eq("id",user.id).execute(); st.session_state.profile=get_profile(user.id); st.success("Perfil actualizado."); st.rerun()
 
 
-# ---- Entrenador ----
 def coach_athletes(user):
     back("home"); st.title("👥 Mis atletas"); st.caption("Selecciona un atleta para abrir su ficha completa.")
     athletes=supabase.table("profiles").select("id,full_name,email,specialty,sex").eq("coach_id",user.id).order("full_name").execute().data
@@ -241,19 +261,40 @@ def safe_query(table,select,athlete_id,order=None,limit=100,extra=None):
     except Exception: return []
 
 
+def _render_health_summary(sessions):
+    if not sessions: st.info("Todavía no hay entrenamientos registrados."); return
+    df=pd.DataFrame(sessions)
+    if "health_status" not in df.columns: st.info("Todavía no hay registros de salud en los entrenamientos."); return
+    health=df[df["health_status"].notna()].copy()
+    if health.empty: st.info("Los entrenamientos anteriores todavía no tienen registro de salud."); return
+    health["estado"]=health["health_status"].map(HEALTH_LABELS)
+    counts=health["estado"].value_counts().rename_axis("estado").reset_index(name="entrenamientos")
+    st.subheader("Registro de salud en entrenamientos")
+    c1,c2,c3=st.columns(3)
+    c1.metric("Sin problemas",int((health["health_status"]=="completed_no_problem").sum()))
+    c2.metric("Con problema o adaptado",int(health["health_status"].isin(["completed_with_health_problem","adapted_due_health_problem"]).sum()))
+    c3.metric("No completados",int((health["health_status"]=="not_completed_due_health_problem").sum()))
+    st.bar_chart(counts.set_index("estado")[["entrenamientos"]])
+    cols=[c for c in ["session_date","volume_m","rpe","estado","notes"] if c in health.columns]
+    st.dataframe(health[cols].sort_values("session_date",ascending=False),use_container_width=True,hide_index=True)
+
+
 def coach_athlete_detail(user):
     back("coach_athletes","Volver a Mis atletas"); a=st.session_state.get("selected_athlete")
     if not a: st.session_state.view="coach_athletes"; st.rerun()
     st.title(f"👤 {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m"); aid=a["id"]
-    sessions=safe_query("training_sessions","id,session_date,duration_minutes,volume_m,rpe,srpe_load,notes",aid,"session_date",120)
+    sessions=safe_query("training_sessions","id,session_date,duration_minutes,volume_m,rpe,srpe_load,health_status,notes",aid,"session_date",120)
     wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120)
     comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100)
     cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
-    tabs=st.tabs(["Entrenamientos","Series y tiempos","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
+    tabs=st.tabs(["Entrenamientos","Salud en entrenamientos","Series y tiempos","RPE","Wellness","Competiciones","Ciclo compartido","Evolución"])
     with tabs[0]:
-        if sessions: st.dataframe(pd.DataFrame(sessions)[[c for c in ["session_date","volume_m","duration_minutes","rpe","srpe_load","notes"] if c in pd.DataFrame(sessions).columns]],use_container_width=True,hide_index=True)
+        if sessions:
+            df=pd.DataFrame(sessions); df["estado_salud"]=df["health_status"].map(HEALTH_LABELS)
+            st.dataframe(df[[c for c in ["session_date","volume_m","duration_minutes","rpe","srpe_load","estado_salud","notes"] if c in df.columns]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay entrenamientos registrados.")
-    with tabs[1]:
+    with tabs[1]: _render_health_summary(sessions)
+    with tabs[2]:
         if not sessions: st.info("Todavía no hay series registradas.")
         else:
             session_ids=[x["id"] for x in sessions]
@@ -266,19 +307,19 @@ def coach_athlete_detail(user):
                 if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
                 else: st.info("No hay tiempos de repeticiones registrados.")
             except Exception as e: st.warning(f"No se pudieron cargar las series: {e}")
-    with tabs[2]:
+    with tabs[3]:
         if sessions:
             df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); _fixed_axis_chart(df,"session_date","rpe",ymin=0,ymax=10); st.dataframe(df[["session_date","volume_m","rpe","srpe_load"]],use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay datos de RPE.")
-    with tabs[3]: _render_wellness_summary(wellness_rows)
-    with tabs[4]:
+    with tabs[4]: _render_wellness_summary(wellness_rows)
+    with tabs[5]:
         if comps: st.dataframe(pd.DataFrame(comps),use_container_width=True,hide_index=True)
         else: st.info("Todavía no hay competiciones registradas.")
-    with tabs[5]:
+    with tabs[6]:
         if a.get("sex")!="female": st.info("Este atleta no tiene activo el módulo de ciclo menstrual.")
         elif cycles: st.dataframe(pd.DataFrame(cycles)[["start_date","end_date","notes"]],use_container_width=True,hide_index=True)
         else: st.info("No hay registros del ciclo compartidos con el entrenador.")
-    with tabs[6]:
+    with tabs[7]:
         if sessions:
             df=pd.DataFrame(sessions); df["session_date"]=pd.to_datetime(df["session_date"]); st.subheader("Carga interna (metros × RPE)"); st.line_chart(df.set_index("session_date")[["srpe_load"]])
         if comps:
