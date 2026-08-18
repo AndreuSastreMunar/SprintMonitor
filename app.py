@@ -119,7 +119,7 @@ def athlete_home(user,profile):
 def training(user):
     back(); st.title("🏃 Entrenamiento"); st.caption("RPE única para toda la sesión.")
     if "blocks" not in st.session_state: st.session_state.blocks=[{"d":60.0,"r":3,"rec":6.0}]
-    day=st.date_input("Fecha",date.today()); duration=st.number_input("Duración total (min)",1,300,75); rpe=st.slider("RPE global",0.0,10.0,5.0,0.5); notes=st.text_area("Comentarios generales"); updated=[]
+    day=st.date_input("Fecha",date.today()); rpe=st.slider("RPE global",0.0,10.0,5.0,0.5); notes=st.text_area("Comentarios generales"); updated=[]
     for i,b in enumerate(st.session_state.blocks):
         with st.container(border=True):
             st.markdown(f"**Bloque {i+1}**"); x,y,z=st.columns(3); d=x.number_input("Metros",1.0,500.0,float(b["d"]),5.0,key=f"d{i}"); reps=y.number_input("Veces",1,20,int(b["r"]),key=f"r{i}"); rec=z.number_input("Recuperación (min)",0.0,30.0,float(b["rec"]),0.5,key=f"rec{i}")
@@ -156,7 +156,7 @@ def training(user):
             st.warning("Debes indicar el motivo antes de guardar.")
         else:
             try:
-                s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"duration_minutes":int(duration),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
+                s=supabase.table("training_sessions").insert({"athlete_id":user.id,"session_date":str(day),"rpe":float(rpe),"health_status":health_status,"notes":notes or None}).execute().data[0]
                 for order,b in enumerate(st.session_state.blocks,1):
                     supabase.table("sprint_sets").insert({"session_id":s["id"],"set_order":order,"distance_m":float(b["d"]),"repetitions":b["r"],"recovery_seconds":int(round(b["rec"]*60))}).execute()
                 st.session_state.pop("blocks",None); st.session_state.pop("health_completed_ok",None); st.session_state.pop("health_reason",None)
