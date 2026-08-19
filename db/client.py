@@ -16,6 +16,7 @@ _original_dataframe = st.dataframe
 _original_vega_lite_chart = st.vega_lite_chart
 _original_selectbox = st.selectbox
 _original_title = st.title
+_original_tabs = st.tabs
 
 _DATE_COLUMN_NAMES = {
     "fecha",
@@ -262,6 +263,93 @@ def _show_avatar(uid, editable=False):
                 st.error(f"No se pudo guardar la foto: {exc}")
 
 
+# Mejores marcas personales y de temporada, calculadas automáticamente
+# a partir de las competiciones registradas por el atleta.
+_MARK_EVENTS = ["60m", "100m", "200m", "400m"]
+
+
+def _competition_rows(uid):
+    try:
+        return (
+            get_supabase()
+            .table("competitions")
+            .select("competition_date,competition_name,event,result_seconds,wind")
+            .eq("athlete_id", uid)
+            .in_("event", _MARK_EVENTS)
+            .order("competition_date")
+            .limit(500)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        return []
+
+
+def _best_result(df):
+    if df.empty:
+        return None
+    valid = df[pd.to_numeric(df["result_seconds"], errors="coerce") > 0].copy()
+    if valid.empty:
+        return None
+    valid["result_seconds"] = pd.to_numeric(valid["result_seconds"], errors="coerce")
+    return valid.loc[valid["result_seconds"].idxmin()]
+
+
+def _mark_caption(row):
+    if row is None:
+        return "Sin marca registrada"
+    parsed = pd.to_datetime(row.get("competition_date"), errors="coerce")
+    when = parsed.strftime("%d/%m/%Y") if not pd.isna(parsed) else ""
+    competition = row.get("competition_name") or ""
+    wind = row.get("wind")
+    extras = [x for x in [when, competition] if x]
+    if wind is not None:
+        try:
+            extras.append(f"viento {float(wind):+.1f} m/s")
+        except Exception:
+            pass
+    return " · ".join(extras) if extras else "Marca registrada"
+
+
+def _render_marks(uid, key_prefix):
+    rows = _competition_rows(uid)
+    df = pd.DataFrame(rows)
+    current_year = int(pd.Timestamp.today().year)
+
+    if not df.empty:
+        df["competition_date"] = pd.to_datetime(df["competition_date"], errors="coerce")
+        df["result_seconds"] = pd.to_numeric(df["result_seconds"], errors="coerce")
+        years = sorted(df["competition_date"].dt.year.dropna().astype(int).unique().tolist(), reverse=True)
+    else:
+        years = []
+
+    if current_year not in years:
+        years = [current_year] + years
+    if not years:
+        years = [current_year]
+
+    st.markdown("### 🏅 Marcas")
+    season = st.selectbox("Temporada", years, index=0, key=f"marks_season_{key_prefix}")
+    st.caption("La mejor marca personal usa todas las competiciones registradas. La mejor marca de la temporada usa el año seleccionado.")
+
+    cols = st.columns(2)
+    for index, event in enumerate(_MARK_EVENTS):
+        event_df = df[df["event"] == event].copy() if not df.empty else pd.DataFrame()
+        pb = _best_result(event_df)
+        season_df = event_df[event_df["competition_date"].dt.year == int(season)].copy() if not event_df.empty else pd.DataFrame()
+        sb = _best_result(season_df)
+
+        with cols[index % 2]:
+            with st.container(border=True):
+                st.markdown(f"#### {event.replace('m', ' m')}")
+                c1, c2 = st.columns(2)
+                c1.metric("Marca personal", f"{float(pb['result_seconds']):.3f} s" if pb is not None else "—")
+                c2.metric(f"Temporada {season}", f"{float(sb['result_seconds']):.3f} s" if sb is not None else "—")
+                st.caption(f"MP: {_mark_caption(pb)}")
+                st.caption(f"MT: {_mark_caption(sb)}")
+
+
 def _title_with_profile_photo(body, *args, **kwargs):
     result = _original_title(body, *args, **kwargs)
     try:
@@ -269,6 +357,7 @@ def _title_with_profile_photo(body, *args, **kwargs):
             user = st.session_state.get("user")
             if user:
                 _show_avatar(user.id, editable=True)
+                _render_marks(user.id, "athlete_profile")
         elif isinstance(body, str) and body.startswith("👤 "):
             athlete = st.session_state.get("selected_athlete")
             if athlete and athlete.get("id"):
@@ -278,6 +367,29 @@ def _title_with_profile_photo(body, *args, **kwargs):
     return result
 
 
+def _tabs_with_coach_marks(labels, *args, **kwargs):
+    values = list(labels)
+    try:
+        caller = inspect.currentframe().f_back
+        is_coach_detail = (
+            caller is not None
+            and caller.f_code.co_name == "coach_athlete_detail"
+            and "Entrenamientos" in values
+            and "Competiciones" in values
+            and "Carga" in values
+        )
+        if is_coach_detail and "Marcas" not in values:
+            tabs = _original_tabs(values + ["🏅 Marcas"], *args, **kwargs)
+            athlete = st.session_state.get("selected_athlete") or {}
+            if athlete.get("id"):
+                with tabs[-1]:
+                    _render_marks(athlete["id"], "coach_athlete")
+            return tabs
+    except Exception:
+        pass
+    return _original_tabs(values, *args, **kwargs)
+
+
 if not getattr(st.selectbox, "_sprint_monitor_400m", False):
     _selectbox_with_400m._sprint_monitor_400m = True
     st.selectbox = _selectbox_with_400m
@@ -285,6 +397,10 @@ if not getattr(st.selectbox, "_sprint_monitor_400m", False):
 if not getattr(st.title, "_sprint_monitor_profile_photo", False):
     _title_with_profile_photo._sprint_monitor_profile_photo = True
     st.title = _title_with_profile_photo
+
+if not getattr(st.tabs, "_sprint_monitor_marks", False):
+    _tabs_with_coach_marks._sprint_monitor_marks = True
+    st.tabs = _tabs_with_coach_marks
 
 
 def get_supabase() -> Client:
