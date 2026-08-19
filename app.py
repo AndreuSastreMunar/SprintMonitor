@@ -22,6 +22,8 @@ HEALTH_LABELS={
     "adapted_due_health_problem":"Adaptado por problemas de salud",
     "not_completed_due_health_problem":"No completado por problemas de salud",
 }
+MARK_EVENTS=["60m","100m","200m","400m"]
+SEASON_START_MONTH=8
 
 def get_profile(uid):
     return supabase.table("profiles").select("*").eq("id",uid).single().execute().data
@@ -88,6 +90,104 @@ def _period_label(df,date_col,period):
     else: x["periodo"]=x[date_col].dt.to_period("M").apply(lambda p:p.start_time)
     return x
 
+def _season_start_for_date(value):
+    ts=pd.Timestamp(value)
+    return int(ts.year if ts.month>=SEASON_START_MONTH else ts.year-1)
+
+def _season_label(start_year):
+    return f"Temporada {start_year}/{start_year+1}"
+
+def _load_marks(uid):
+    rows=[]
+    try:
+        comps=(supabase.table("competitions").select("competition_date,competition_name,event,result_seconds,wind").eq("athlete_id",uid).in_("event",MARK_EVENTS).order("competition_date").limit(500).execute().data or [])
+        for r in comps:
+            rows.append({"id":None,"event":r.get("event"),"mark_seconds":r.get("result_seconds"),"mark_date":r.get("competition_date"),"source":r.get("competition_name") or "Competición","wind":r.get("wind"),"manual":False,"notes":None})
+    except Exception:
+        pass
+    manual_available=True
+    manual_rows=[]
+    try:
+        manual_rows=(supabase.table("athlete_marks").select("id,event,mark_seconds,mark_date,notes").eq("athlete_id",uid).order("mark_date").limit(500).execute().data or [])
+        for r in manual_rows:
+            rows.append({"id":r.get("id"),"event":r.get("event"),"mark_seconds":r.get("mark_seconds"),"mark_date":r.get("mark_date"),"source":"Marca añadida por el atleta","wind":None,"manual":True,"notes":r.get("notes")})
+    except Exception:
+        manual_available=False
+    return rows,manual_rows,manual_available
+
+def _best_mark(df):
+    if df.empty: return None
+    valid=df[pd.to_numeric(df["mark_seconds"],errors="coerce")>0].copy()
+    if valid.empty: return None
+    valid["mark_seconds"]=pd.to_numeric(valid["mark_seconds"],errors="coerce")
+    return valid.loc[valid["mark_seconds"].idxmin()]
+
+def _mark_caption(row):
+    if row is None: return "Sin marca registrada"
+    parsed=pd.to_datetime(row.get("mark_date"),errors="coerce")
+    when=parsed.strftime("%d/%m/%Y") if not pd.isna(parsed) else ""
+    extras=[x for x in [when,row.get("source") or ""] if x]
+    wind=row.get("wind")
+    if wind is not None:
+        try: extras.append(f"viento {float(wind):+.1f} m/s")
+        except Exception: pass
+    if row.get("notes"): extras.append(str(row.get("notes")))
+    return " · ".join(extras) if extras else "Marca registrada"
+
+def _render_marks(uid,key_prefix,editable=False):
+    rows,manual_rows,manual_available=_load_marks(uid)
+    df=pd.DataFrame(rows)
+    now=pd.Timestamp.today(); current_start=_season_start_for_date(now)
+    season_starts=[]
+    if not df.empty:
+        df["mark_date"]=pd.to_datetime(df["mark_date"],errors="coerce")
+        df["mark_seconds"]=pd.to_numeric(df["mark_seconds"],errors="coerce")
+        season_starts=sorted({_season_start_for_date(d) for d in df["mark_date"].dropna()},reverse=True)
+    if current_start not in season_starts: season_starts=[current_start]+season_starts
+    labels=[_season_label(y) for y in season_starts]
+    selected_label=st.selectbox("Temporada",labels,index=0,key=f"marks_season_{key_prefix}")
+    selected_start=season_starts[labels.index(selected_label)]
+    season_from=pd.Timestamp(year=selected_start,month=SEASON_START_MONTH,day=1)
+    season_to=pd.Timestamp(year=selected_start+1,month=SEASON_START_MONTH,day=1)
+    st.caption("La marca personal usa todos los registros. La marca de la temporada usa la temporada seleccionada.")
+    cols=st.columns(2)
+    for index,event in enumerate(MARK_EVENTS):
+        event_df=df[df["event"]==event].copy() if not df.empty else pd.DataFrame()
+        pb=_best_mark(event_df)
+        season_df=event_df[(event_df["mark_date"]>=season_from)&(event_df["mark_date"]<season_to)].copy() if not event_df.empty else pd.DataFrame()
+        sb=_best_mark(season_df)
+        with cols[index%2]:
+            with st.container(border=True):
+                st.markdown(f"### {event.replace('m',' m')}")
+                c1,c2=st.columns(2)
+                c1.metric("Marca personal",f"{float(pb['mark_seconds']):.3f} s" if pb is not None else "—")
+                c2.metric(selected_label,f"{float(sb['mark_seconds']):.3f} s" if sb is not None else "—")
+                st.caption(f"MP: {_mark_caption(pb)}")
+                st.caption(f"MT: {_mark_caption(sb)}")
+    if editable:
+        st.divider(); st.markdown("### ➕ Añadir marca")
+        if not manual_available:
+            st.warning("Para añadir marcas manualmente, ejecuta primero db/007_athlete_marks.sql en Supabase.")
+        with st.form(f"add_mark_{key_prefix}"):
+            c1,c2=st.columns(2)
+            event=c1.selectbox("Prueba",MARK_EVENTS,key=f"mark_event_{key_prefix}")
+            mark_date=c2.date_input("Fecha de la marca",date.today(),key=f"mark_date_{key_prefix}")
+            mark=st.number_input("Marca (s)",min_value=0.0,max_value=120.0,value=0.0,step=0.01,format="%.3f",key=f"mark_seconds_{key_prefix}")
+            notes=st.text_input("Comentario (opcional)",key=f"mark_notes_{key_prefix}")
+            save=st.form_submit_button("Guardar marca",use_container_width=True)
+        if save:
+            if mark<=0: st.warning("Introduce una marca válida.")
+            elif not manual_available: st.error("Primero ejecuta db/007_athlete_marks.sql en Supabase.")
+            else:
+                try:
+                    supabase.table("athlete_marks").insert({"athlete_id":uid,"event":event,"mark_seconds":float(mark),"mark_date":str(mark_date),"notes":notes or None}).execute()
+                    st.success("Marca guardada. Tu entrenador podrá verla automáticamente."); st.rerun()
+                except Exception as e: st.error(f"No se pudo guardar la marca: {e}")
+        if manual_rows:
+            st.markdown("### Mis marcas añadidas")
+            manual_df=pd.DataFrame(manual_rows).rename(columns={"mark_date":"Fecha","event":"Prueba","mark_seconds":"Marca (s)","notes":"Comentario"})
+            st.dataframe(manual_df[["Fecha","Prueba","Marca (s)","Comentario"]],use_container_width=True,hide_index=True)
+
 def athlete_home(user,profile):
     if st.session_state.get("flash_message"): st.success(st.session_state.pop("flash_message"))
     header(profile,"ATLETA"); c1,c2=st.columns(2); card(c1,"🏃","Entrenamiento","Series, metros y RPE",1,"training","m1"); card(c2,"❤️","Wellness","Cómo te encuentras hoy",2,"wellness","m2")
@@ -115,11 +215,9 @@ def training(user):
     back(); st.title("🏃 Entrenamiento"); st.caption("RPE única para toda la sesión. El tiempo de cada serie es opcional.")
     if "blocks" not in st.session_state: st.session_state.blocks=[{"series":[_new_series()]}]
     day=st.date_input("Fecha",date.today()); rpe=st.slider("RPE global",0.0,10.0,5.0,0.5); notes=st.text_area("Comentarios generales")
-
     st.markdown("### Trabajo complementario")
     did_gym_answer=st.radio("¿Has hecho gimnasio?",["Sí","No"],horizontal=True,index=None,key="training_did_gym")
     did_plyo_answer=st.radio("¿Has hecho pliometría?",["Sí","No"],horizontal=True,index=None,key="training_did_plyo")
-
     updated_blocks=[]
     for i,b in enumerate(st.session_state.blocks):
         with st.container(border=True):
@@ -133,30 +231,22 @@ def training(user):
                 time_value=c2.text_input("Tiempo serie (s)",value=str(s.get("time") or ""),placeholder="Opcional",key=f"series_time_{i}_{n}")
                 recovery=c3.number_input("Recuperación después de la serie (min)",0.0,60.0,float(s.get("recovery",5.0)),0.5,key=f"series_recovery_{i}_{n}")
                 shown.append({"distance":distance,"time":time_value,"recovery":recovery})
-                if c4.button("✕",key=f"remove_series_{i}_{n}",disabled=len(current_series)==1):
-                    st.session_state.blocks[i]["series"].pop(n-1); st.rerun()
-            if st.button("➕ Añadir serie",key=f"add_series_{i}"):
-                st.session_state.blocks[i].setdefault("series",[]).append(_new_series()); st.rerun()
+                if c4.button("✕",key=f"remove_series_{i}_{n}",disabled=len(current_series)==1): st.session_state.blocks[i]["series"].pop(n-1); st.rerun()
+            if st.button("➕ Añadir serie",key=f"add_series_{i}"): st.session_state.blocks[i].setdefault("series",[]).append(_new_series()); st.rerun()
             st.caption(f"Volumen del bloque: {sum(float(s['distance']) for s in shown):.0f} m")
             if st.button("Eliminar bloque",key=f"del_block_{i}",disabled=len(st.session_state.blocks)==1): st.session_state.blocks.pop(i); st.rerun()
             updated_blocks.append({"series":shown})
     st.session_state.blocks=updated_blocks
-
-    if st.button("➕ Añadir bloque"):
-        st.session_state.blocks.append({"series":[_new_series()]}); st.rerun()
-
+    if st.button("➕ Añadir bloque"): st.session_state.blocks.append({"series":[_new_series()]}); st.rerun()
     total=sum(float(s["distance"]) for b in st.session_state.blocks for s in b["series"])
     st.info(f"Volumen total: **{total:.0f} m** · RPE: **{rpe:g}** · Carga: **{total*rpe:.0f} UA**")
-
     st.markdown("### Finalización de entreno")
     completed_ok=st.radio("¿Has podido completar todo el entrenamiento sin ningún problema de salud?",["Sí","No"],horizontal=True,index=None,key="health_completed_ok")
     health_status=None; reason=None
     if completed_ok=="Sí": health_status="completed_no_problem"
     elif completed_ok=="No":
         reason=st.radio("Indica el motivo",["He completado el entrenamiento con algún problema de salud.","He adaptado el entrenamiento debido a problemas de salud.","No he podido completar el entrenamiento debido a problemas de salud."],index=None,key="health_reason")
-        if reason:
-            health_status={"He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem","He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem","No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem"}[reason]
-
+        if reason: health_status={"He completado el entrenamiento con algún problema de salud.":"completed_with_health_problem","He adaptado el entrenamiento debido a problemas de salud.":"adapted_due_health_problem","No he podido completar el entrenamiento debido a problemas de salud.":"not_completed_due_health_problem"}[reason]
     if st.button("💾 Guardar entrenamiento",type="primary"):
         parsed=[]; invalid_time=False
         for block_index,b in enumerate(st.session_state.blocks,1):
@@ -225,23 +315,10 @@ def _render_wellness_summary(rows):
 def evolution(user):
     back(); st.title("📈 Mi evolución")
     sessions=supabase.table("training_sessions").select("session_date,volume_m,rpe,srpe_load").eq("athlete_id",user.id).order("session_date").limit(500).execute().data or []
-    comps=supabase.table("competitions").select("competition_date,event,result_seconds,wind,competition_name").eq("athlete_id",user.id).order("competition_date").limit(200).execute().data or []
     try: wellness_rows=supabase.table("wellness_entries").select("entry_date,sleep,fatigue,muscle_soreness,stress,readiness").eq("athlete_id",user.id).order("entry_date").limit(500).execute().data or []
     except Exception: wellness_rows=[]
-    t1,t2,t3=st.tabs(["🏅 Mejor marca","📊 Carga","❤️ Bienestar"])
-    with t1:
-        st.subheader("Mejor marca de la temporada")
-        if not comps: st.info("Todavía no hay competiciones registradas.")
-        else:
-            cdf=pd.DataFrame(comps); cdf["competition_date"]=pd.to_datetime(cdf["competition_date"]); years=sorted(cdf["competition_date"].dt.year.dropna().unique().tolist(),reverse=True); season=st.selectbox("Temporada",years,index=0); season_df=cdf[cdf["competition_date"].dt.year==season]; cols=st.columns(2); events=["60m","100m","200m","400m"]
-            for i,event in enumerate(events):
-                edf=season_df[(season_df["event"]==event)&(pd.to_numeric(season_df["result_seconds"],errors="coerce")>0)].copy()
-                with cols[i%2]:
-                    with st.container(border=True):
-                        st.markdown(f"### {event.replace('m',' m')}")
-                        if edf.empty: st.caption("Sin marca registrada")
-                        else:
-                            best=edf.loc[pd.to_numeric(edf["result_seconds"],errors="coerce").idxmin()]; st.metric("Mejor marca",f"{float(best['result_seconds']):.3f} s"); st.caption(f"{best['competition_date'].date()} · {best.get('competition_name') or ''}")
+    t1,t2,t3=st.tabs(["🏅 Marcas","📊 Carga","❤️ Bienestar"])
+    with t1: _render_marks(user.id,"athlete_evolution",editable=True)
     with t2:
         if not sessions: st.info("Todavía no hay entrenamientos.")
         else:
@@ -297,7 +374,7 @@ def coach_athlete_detail(user):
     if not a: st.session_state.view="coach_athletes"; st.rerun()
     st.title(f"👤 {a.get('full_name') or a.get('email')}"); st.caption(a.get("specialty") or "100 / 200 m"); aid=a["id"]
     sessions=safe_query("training_sessions","id,session_date,volume_m,rpe,srpe_load,did_gym,did_plyometrics,health_status,notes",aid,"session_date",120); wellness_rows=safe_query("wellness_entries","entry_date,sleep,fatigue,muscle_soreness,stress,readiness,notes",aid,"entry_date",120); comps=safe_query("competitions","competition_date,competition_name,event,round,result_seconds,wind,position",aid,"competition_date",100); cycles=safe_query("menstrual_cycles","start_date,end_date,notes,share_with_coach",aid,"start_date",50,lambda q:q.eq("share_with_coach",True))
-    tabs=st.tabs(["Entrenamientos","Entrenamientos completados","Series","Gimnasio","Pliometría","RPE","Wellness","Competiciones","Ciclo compartido","Carga"])
+    tabs=st.tabs(["Entrenamientos","Entrenamientos completados","Series","Gimnasio","Pliometría","RPE","Wellness","Competiciones","Ciclo compartido","Carga","Marcas"])
     with tabs[0]:
         if sessions:
             df=pd.DataFrame(sessions); df["estado_salud"]=df["health_status"].map(HEALTH_LABELS); st.dataframe(df[[c for c in ["session_date","volume_m","rpe","srpe_load","estado_salud","notes"] if c in df.columns]],use_container_width=True,hide_index=True)
@@ -342,6 +419,7 @@ def coach_athlete_detail(user):
             with m_tab: _render_athlete_load(df,"Metros","volume_m","m","sum","coach_detail_meters")
             with r_tab: _render_athlete_load(df,"RPE","rpe","0–10","mean","coach_detail_rpe",True)
             with l_tab: _render_athlete_load(df,"Metros × RPE","srpe_load","UA","sum","coach_detail_load")
+    with tabs[10]: _render_marks(aid,"coach_athlete",editable=False)
 
 def _period_series(df,value_col,period,aggregation):
     x=_period_label(df,"session_date",period); return x.pivot_table(index="periodo",columns="atleta",values=value_col,aggfunc=aggregation,fill_value=0).sort_index()
