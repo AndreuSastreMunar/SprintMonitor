@@ -1,8 +1,10 @@
 import copy
 import inspect
+import io
 
 import pandas as pd
 import streamlit as st
+from PIL import Image, ImageOps
 from supabase import create_client, Client
 
 
@@ -12,6 +14,8 @@ from supabase import create_client, Client
 _original_date_input = st.date_input
 _original_dataframe = st.dataframe
 _original_vega_lite_chart = st.vega_lite_chart
+_original_selectbox = st.selectbox
+_original_title = st.title
 
 _DATE_COLUMN_NAMES = {
     "fecha",
@@ -34,7 +38,6 @@ def _date_input_es(*args, **kwargs):
     try:
         return _original_date_input(*args, **kwargs)
     except TypeError:
-        # Compatibilidad con versiones antiguas de Streamlit.
         kwargs.pop("format", None)
         return _original_date_input(*args, **kwargs)
 
@@ -88,8 +91,6 @@ def _apply_spanish_temporal_format(spec):
 
 
 def _vega_lite_chart_es(data=None, spec=None, *args, **kwargs):
-    # Streamlit admite tanto st.vega_lite_chart(spec) como
-    # st.vega_lite_chart(data, spec). Cubrimos ambas formas.
     if spec is None and isinstance(data, dict) and "encoding" in data:
         data = _apply_spanish_temporal_format(data)
     else:
@@ -111,8 +112,6 @@ if not getattr(st.vega_lite_chart, "_sprint_monitor_es", False):
 
 
 # Los gráficos de RPE deben usar siempre la escala fisiológica 0-10.
-# Streamlit st.line_chart ajusta el eje automáticamente, así que interceptamos
-# únicamente los gráficos de RPE y los dibujamos con Vega-Lite con dominio fijo.
 _original_line_chart = st.line_chart
 
 
@@ -176,8 +175,6 @@ def _line_chart_with_fixed_rpe(data=None, *args, **kwargs):
         if caller_is_group_rpe or single_rpe_series:
             return _fixed_rpe_line_chart(data)
     except Exception:
-        # Si no podemos identificar el gráfico, conservamos el comportamiento
-        # estándar de Streamlit en lugar de romper la pantalla.
         pass
 
     return _original_line_chart(data, *args, **kwargs)
@@ -186,6 +183,108 @@ def _line_chart_with_fixed_rpe(data=None, *args, **kwargs):
 if not getattr(st.line_chart, "_sprint_monitor_fixed_rpe", False):
     _line_chart_with_fixed_rpe._sprint_monitor_fixed_rpe = True
     st.line_chart = _line_chart_with_fixed_rpe
+
+
+# Especialidad 400 m y foto de perfil ligera.
+def _selectbox_with_400m(label, options, *args, **kwargs):
+    if label == "Especialidad":
+        values = list(options)
+        if "400 m" not in values:
+            values.append("400 m")
+        profile = st.session_state.get("profile") or {}
+        current = profile.get("specialty")
+        if current in values:
+            kwargs["index"] = values.index(current)
+        options = values
+    return _original_selectbox(label, options, *args, **kwargs)
+
+
+def _avatar_bytes(uploaded_file):
+    image = Image.open(uploaded_file).convert("RGB")
+    image = ImageOps.fit(image, (256, 256), method=Image.Resampling.LANCZOS)
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=58, optimize=True, progressive=True)
+    data = output.getvalue()
+    if len(data) > 450_000:
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=42, optimize=True)
+        data = output.getvalue()
+    return data
+
+
+def _profile_row(uid):
+    try:
+        return get_supabase().table("profiles").select("id,avatar_path").eq("id", uid).single().execute().data or {}
+    except Exception:
+        return {}
+
+
+def _show_avatar(uid, editable=False):
+    client = get_supabase()
+    row = _profile_row(uid)
+    avatar_path = row.get("avatar_path")
+
+    if avatar_path:
+        try:
+            signed = client.storage.from_("profile-photos").create_signed_url(avatar_path, 900)
+            url = signed.get("signedURL") or signed.get("signedUrl") or signed.get("signed_url")
+            if url:
+                st.image(url, width=120)
+        except Exception:
+            pass
+
+    if not editable:
+        return
+
+    uploaded = st.file_uploader(
+        "Foto de perfil",
+        type=["jpg", "jpeg", "png", "webp"],
+        key="profile_photo_upload",
+        help="La app la reduce automáticamente a 256×256 px y baja calidad para que pese poco.",
+    )
+    if uploaded is not None:
+        st.caption("La foto se recortará en formato cuadrado y se comprimirá antes de subirla.")
+        if st.button("Guardar foto de perfil", key="save_profile_photo"):
+            try:
+                data = _avatar_bytes(uploaded)
+                path = f"{uid}/avatar.jpg"
+                client.storage.from_("profile-photos").upload(
+                    path=path,
+                    file=data,
+                    file_options={"content-type": "image/jpeg", "upsert": "true", "cache-control": "3600"},
+                )
+                client.table("profiles").update({"avatar_path": path}).eq("id", uid).execute()
+                if st.session_state.get("profile"):
+                    st.session_state.profile["avatar_path"] = path
+                st.success(f"Foto guardada ({max(1, round(len(data) / 1024))} KB).")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudo guardar la foto: {exc}")
+
+
+def _title_with_profile_photo(body, *args, **kwargs):
+    result = _original_title(body, *args, **kwargs)
+    try:
+        if body == "👤 Mi perfil":
+            user = st.session_state.get("user")
+            if user:
+                _show_avatar(user.id, editable=True)
+        elif isinstance(body, str) and body.startswith("👤 "):
+            athlete = st.session_state.get("selected_athlete")
+            if athlete and athlete.get("id"):
+                _show_avatar(athlete["id"], editable=False)
+    except Exception:
+        pass
+    return result
+
+
+if not getattr(st.selectbox, "_sprint_monitor_400m", False):
+    _selectbox_with_400m._sprint_monitor_400m = True
+    st.selectbox = _selectbox_with_400m
+
+if not getattr(st.title, "_sprint_monitor_profile_photo", False):
+    _title_with_profile_photo._sprint_monitor_profile_photo = True
+    st.title = _title_with_profile_photo
 
 
 def get_supabase() -> Client:
