@@ -1,8 +1,113 @@
+import copy
 import inspect
 
 import pandas as pd
 import streamlit as st
 from supabase import create_client, Client
+
+
+# Formato visual español en toda la app.
+# La base de datos sigue guardando fechas en ISO (YYYY-MM-DD), que es lo correcto;
+# aquí solo cambiamos cómo se muestran al usuario.
+_original_date_input = st.date_input
+_original_dataframe = st.dataframe
+_original_vega_lite_chart = st.vega_lite_chart
+
+_DATE_COLUMN_NAMES = {
+    "fecha",
+    "date",
+    "session_date",
+    "entry_date",
+    "competition_date",
+    "start_date",
+    "end_date",
+    "periodo",
+    "día",
+    "semana",
+    "mes",
+}
+
+
+def _date_input_es(*args, **kwargs):
+    """Muestra los selectores de fecha como DD/MM/AAAA."""
+    kwargs.setdefault("format", "DD/MM/YYYY")
+    try:
+        return _original_date_input(*args, **kwargs)
+    except TypeError:
+        # Compatibilidad con versiones antiguas de Streamlit.
+        kwargs.pop("format", None)
+        return _original_date_input(*args, **kwargs)
+
+
+def _format_datetime_series_es(series):
+    parsed = pd.to_datetime(series, errors="coerce")
+    non_null = series.notna()
+    if non_null.any() and parsed[non_null].notna().all():
+        has_time = (
+            (parsed.dt.hour.fillna(0) != 0)
+            | (parsed.dt.minute.fillna(0) != 0)
+            | (parsed.dt.second.fillna(0) != 0)
+        ).any()
+        return parsed.dt.strftime("%d/%m/%Y %H:%M" if has_time else "%d/%m/%Y")
+    return series
+
+
+def _dataframe_es(data=None, *args, **kwargs):
+    """Convierte las fechas de las tablas a DD/MM/AAAA y las horas a 24 h."""
+    if isinstance(data, pd.DataFrame):
+        data = data.copy()
+        for col in data.columns:
+            name = str(col).strip().lower()
+            if name in _DATE_COLUMN_NAMES or pd.api.types.is_datetime64_any_dtype(data[col]):
+                data[col] = _format_datetime_series_es(data[col])
+    return _original_dataframe(data, *args, **kwargs)
+
+
+def _apply_spanish_temporal_format(spec):
+    """Fuerza DD/MM/AAAA en ejes y tooltips temporales de Vega-Lite."""
+    if not isinstance(spec, dict):
+        return spec
+    spec = copy.deepcopy(spec)
+    encoding = spec.get("encoding")
+    if isinstance(encoding, dict):
+        x = encoding.get("x")
+        if isinstance(x, dict) and x.get("type") == "temporal":
+            axis = x.setdefault("axis", {})
+            if isinstance(axis, dict):
+                axis.setdefault("format", "%d/%m/%Y")
+            x.setdefault("format", "%d/%m/%Y")
+
+        tooltip = encoding.get("tooltip")
+        if isinstance(tooltip, list):
+            for item in tooltip:
+                if isinstance(item, dict) and item.get("type") == "temporal":
+                    item.setdefault("format", "%d/%m/%Y")
+        elif isinstance(tooltip, dict) and tooltip.get("type") == "temporal":
+            tooltip.setdefault("format", "%d/%m/%Y")
+    return spec
+
+
+def _vega_lite_chart_es(data=None, spec=None, *args, **kwargs):
+    # Streamlit admite tanto st.vega_lite_chart(spec) como
+    # st.vega_lite_chart(data, spec). Cubrimos ambas formas.
+    if spec is None and isinstance(data, dict) and "encoding" in data:
+        data = _apply_spanish_temporal_format(data)
+    else:
+        spec = _apply_spanish_temporal_format(spec)
+    return _original_vega_lite_chart(data, spec, *args, **kwargs)
+
+
+if not getattr(st.date_input, "_sprint_monitor_es", False):
+    _date_input_es._sprint_monitor_es = True
+    st.date_input = _date_input_es
+
+if not getattr(st.dataframe, "_sprint_monitor_es", False):
+    _dataframe_es._sprint_monitor_es = True
+    st.dataframe = _dataframe_es
+
+if not getattr(st.vega_lite_chart, "_sprint_monitor_es", False):
+    _vega_lite_chart_es._sprint_monitor_es = True
+    st.vega_lite_chart = _vega_lite_chart_es
 
 
 # Los gráficos de RPE deben usar siempre la escala fisiológica 0-10.
@@ -29,7 +134,12 @@ def _fixed_rpe_line_chart(data):
     spec = {
         "mark": {"type": "line", "point": True},
         "encoding": {
-            "x": {"field": x_col, "type": "temporal", "title": None},
+            "x": {
+                "field": x_col,
+                "type": "temporal",
+                "title": None,
+                "axis": {"format": "%d/%m/%Y"},
+            },
             "y": {
                 "field": "RPE",
                 "type": "quantitative",
@@ -41,7 +151,7 @@ def _fixed_rpe_line_chart(data):
             },
             "color": {"field": "serie", "type": "nominal", "title": None},
             "tooltip": [
-                {"field": x_col, "type": "temporal", "title": "Periodo"},
+                {"field": x_col, "type": "temporal", "title": "Periodo", "format": "%d/%m/%Y"},
                 {"field": "serie", "type": "nominal", "title": "Atleta"},
                 {"field": "RPE", "type": "quantitative", "title": "RPE"},
             ],
