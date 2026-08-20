@@ -101,10 +101,6 @@ def _get_supabase_with_hurdles():
             query_class.in_ = in_with_hurdles
             query_class._sprint_monitor_hurdles = True
 
-        # Guardado robusto del trabajo complementario: envolvemos table() en la
-        # instancia del cliente y modificamos únicamente los INSERT de
-        # training_sessions. Así no dependemos de que el builder comparta clase
-        # con otras tablas ni de wrappers previos.
         if not getattr(client, "_sprint_monitor_training_table_wrapped", False):
             original_table = client.table
 
@@ -164,15 +160,16 @@ st.title = _title_without_profile_marks
 def _radio_with_sled(label, options, *args, **kwargs):
     result = st._main.radio(label, options, *args, **kwargs)
     if label == "¿Has hecho pliometría?":
-        sled_result = st._main.radio(
+        # El propio widget con key="training_did_sled" mantiene su valor en
+        # st.session_state. No debemos reasignar esa key después de crear el
+        # widget, porque Streamlit lanza StreamlitAPIException.
+        st._main.radio(
             "¿Has hecho series con arrastres?",
             ["Sí", "No"],
             horizontal=True,
             index=None,
             key="training_did_sled",
         )
-        if sled_result in {"Sí", "No"}:
-            st.session_state["training_did_sled"] = sled_result
     return result
 
 
