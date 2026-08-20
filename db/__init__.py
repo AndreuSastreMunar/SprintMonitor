@@ -25,18 +25,9 @@ def _extend_options(label, options):
     return values
 
 
-# Conservamos funciones base estables para evitar que los reruns de Streamlit
-# encadenen wrappers sobre wrappers y generen widgets duplicados.
+# Conservamos un selector base estable para no encadenar wrappers en reruns.
 if not hasattr(st, "_sprint_monitor_base_selectbox"):
     st._sprint_monitor_base_selectbox = st.selectbox
-if not hasattr(st, "_sprint_monitor_base_radio"):
-    st._sprint_monitor_base_radio = st.radio
-if not hasattr(st, "_sprint_monitor_base_button"):
-    st._sprint_monitor_base_button = st.button
-if not hasattr(st, "_sprint_monitor_base_rerun"):
-    st._sprint_monitor_base_rerun = st.rerun
-if not hasattr(st, "_sprint_monitor_base_tabs"):
-    st._sprint_monitor_base_tabs = st.tabs
 
 
 def _selectbox_before_import(label, options, *args, **kwargs):
@@ -47,8 +38,6 @@ st.selectbox = _selectbox_before_import
 
 from . import client as _client  # noqa: E402
 
-# db.client puede instalar sus propios wrappers. Guardamos el selector resultante
-# una sola vez y añadimos las pruebas de vallas encima.
 if not hasattr(st, "_sprint_monitor_selectbox_after_client"):
     st._sprint_monitor_selectbox_after_client = st.selectbox
 
@@ -93,7 +82,8 @@ def _enumerate_with_hurdles(iterable, *args):
 builtins.enumerate = _enumerate_with_hurdles
 
 
-# Amplía filtros de marcas y añade did_sled al guardar training_sessions.
+# Amplía filtros de marcas y asegura que gimnasio/pliometría/arrastres se
+# guarden exactamente con lo contestado en el formulario del atleta.
 _original_get_supabase = _client.get_supabase
 
 
@@ -115,10 +105,10 @@ def _get_supabase_with_hurdles():
             query_class.in_ = in_with_hurdles
             query_class._sprint_monitor_hurdles = True
 
-        if not getattr(query_class, "_sprint_monitor_sled", False):
+        if not getattr(query_class, "_sprint_monitor_complementary", False):
             original_insert = query_class.insert
 
-            def insert_with_sled(self, json, *args, **kwargs):
+            def insert_with_complementary(self, json, *args, **kwargs):
                 payload = json
                 if (
                     isinstance(json, dict)
@@ -126,16 +116,20 @@ def _get_supabase_with_hurdles():
                     and "session_date" in json
                     and "rpe" in json
                     and "did_gym" in json
-                    and "did_plyometrics" in json
-                    and "did_sled" not in json
                 ):
                     payload = dict(json)
-                    answer = st.session_state.get("training_did_sled")
-                    payload["did_sled"] = answer == "Sí" if answer in {"Sí", "No"} else None
+                    plyo_answer = st.session_state.get("training_did_plyo")
+                    sled_answer = st.session_state.get("training_did_sled")
+                    if plyo_answer in {"Sí", "No"}:
+                        payload["did_plyometrics"] = plyo_answer == "Sí"
+                    if sled_answer in {"Sí", "No"}:
+                        payload["did_sled"] = sled_answer == "Sí"
+                    elif "did_sled" not in payload:
+                        payload["did_sled"] = None
                 return original_insert(self, payload, *args, **kwargs)
 
-            query_class.insert = insert_with_sled
-            query_class._sprint_monitor_sled = True
+            query_class.insert = insert_with_complementary
+            query_class._sprint_monitor_complementary = True
     except Exception:
         pass
     return client
@@ -165,12 +159,13 @@ def _title_without_profile_marks(body, *args, **kwargs):
 st.title = _title_without_profile_marks
 
 
-# Trabajo complementario: tercera pregunta obligatoria. Se usa siempre la
-# función base de radio para que el mismo key no se registre dos veces.
+# Trabajo complementario: tercera pregunta obligatoria. Usamos directamente el
+# DeltaGenerator principal de Streamlit para evitar wrappers encadenados y keys
+# duplicadas después de un redeploy o rerun.
 def _radio_with_sled(label, options, *args, **kwargs):
-    result = st._sprint_monitor_base_radio(label, options, *args, **kwargs)
+    result = st._main.radio(label, options, *args, **kwargs)
     if label == "¿Has hecho pliometría?":
-        st._sprint_monitor_base_radio(
+        st._main.radio(
             "¿Has hecho series con arrastres?",
             ["Sí", "No"],
             horizontal=True,
@@ -184,7 +179,7 @@ st.radio = _radio_with_sled
 
 
 def _button_require_sled(label, *args, **kwargs):
-    clicked = st._sprint_monitor_base_button(label, *args, **kwargs)
+    clicked = st._main.button(label, *args, **kwargs)
     if label == "💾 Guardar entrenamiento" and clicked:
         if st.session_state.get("training_did_sled") not in {"Sí", "No"}:
             st.warning("Debes responder si has hecho series con arrastres antes de guardar.")
@@ -195,17 +190,9 @@ def _button_require_sled(label, *args, **kwargs):
 st.button = _button_require_sled
 
 
-def _rerun_clear_sled(*args, **kwargs):
-    if st.session_state.get("flash_message") == "Entrenamiento guardado correctamente.":
-        st.session_state.pop("training_did_sled", None)
-    return st._sprint_monitor_base_rerun(*args, **kwargs)
-
-
-st.rerun = _rerun_clear_sled
-
-
-# Ficha del entrenador: Arrastres se ve entre Series y Gimnasio sin alterar
-# los índices lógicos que app.py usa para las demás pestañas.
+# Ficha del entrenador: creamos UNA sola barra de pestañas. Arrastres aparece
+# entre Series y Gimnasio, pero devolvemos los objetos en el orden lógico que
+# app.py espera para no desplazar Gimnasio, Pliometría, RPE, etc.
 def _tabs_with_sled(labels, *args, **kwargs):
     values = list(labels)
     try:
@@ -220,7 +207,7 @@ def _tabs_with_sled(labels, *args, **kwargs):
         if is_coach_detail and "Arrastres" not in values:
             insert_at = values.index("Gimnasio")
             display_values = values[:insert_at] + ["Arrastres"] + values[insert_at:]
-            display_tabs = st._sprint_monitor_base_tabs(display_values, *args, **kwargs)
+            display_tabs = st._main.tabs(display_values, *args, **kwargs)
             sled_tab = display_tabs[insert_at]
             aid = caller.f_locals.get("aid")
             with sled_tab:
@@ -261,7 +248,7 @@ def _tabs_with_sled(labels, *args, **kwargs):
             return display_tabs[:insert_at] + display_tabs[insert_at + 1:] + [sled_tab]
     except Exception:
         pass
-    return st._sprint_monitor_base_tabs(values, *args, **kwargs)
+    return st._main.tabs(values, *args, **kwargs)
 
 
 st.tabs = _tabs_with_sled
