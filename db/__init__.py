@@ -245,9 +245,17 @@ def _tabs_with_sled(labels, *args, **kwargs):
                     except Exception as exc:
                         st.warning(f"No se pudieron cargar los arrastres: {exc}")
 
-            return display_tabs[:insert_at] + display_tabs[insert_at + 1:] + [sled_tab]
-    except Exception:
-        pass
+            # display_tabs es una tupla: convertimos los segmentos a listas para
+            # no provocar TypeError. Así evitamos caer al fallback, que era lo que
+            # generaba una segunda barra de pestañas debajo de la primera.
+            logical_tabs = list(display_tabs[:insert_at]) + list(display_tabs[insert_at + 1:]) + [sled_tab]
+            return logical_tabs
+    except Exception as exc:
+        # Si algo falla antes de crear la barra, usamos la barra normal. Si la
+        # barra ya se creó, no generamos una segunda fila visual.
+        if "display_tabs" in locals():
+            st.warning(f"No se pudo completar la pestaña de arrastres: {exc}")
+            return list(display_tabs)
     return st._main.tabs(values, *args, **kwargs)
 
 
