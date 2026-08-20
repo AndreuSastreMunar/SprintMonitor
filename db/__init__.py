@@ -25,7 +25,6 @@ def _extend_options(label, options):
     return values
 
 
-# Conservamos un selector base estable para no encadenar wrappers en reruns.
 if not hasattr(st, "_sprint_monitor_base_selectbox"):
     st._sprint_monitor_base_selectbox = st.selectbox
 
@@ -60,7 +59,6 @@ if not getattr(DeltaGenerator.selectbox, "_sprint_monitor_hurdles", False):
     DeltaGenerator.selectbox = _delta_selectbox_with_hurdles
 
 
-# Amplía las tarjetas de marcas a las pruebas de vallas.
 if not hasattr(builtins, "_sprint_monitor_original_enumerate"):
     builtins._sprint_monitor_original_enumerate = builtins.enumerate
 
@@ -82,8 +80,6 @@ def _enumerate_with_hurdles(iterable, *args):
 builtins.enumerate = _enumerate_with_hurdles
 
 
-# Amplía filtros de marcas y asegura que gimnasio/pliometría/arrastres se
-# guarden exactamente con lo contestado en el formulario del atleta.
 _original_get_supabase = _client.get_supabase
 
 
@@ -105,31 +101,38 @@ def _get_supabase_with_hurdles():
             query_class.in_ = in_with_hurdles
             query_class._sprint_monitor_hurdles = True
 
-        if not getattr(query_class, "_sprint_monitor_complementary", False):
-            original_insert = query_class.insert
+        # Guardado robusto del trabajo complementario: envolvemos table() en la
+        # instancia del cliente y modificamos únicamente los INSERT de
+        # training_sessions. Así no dependemos de que el builder comparta clase
+        # con otras tablas ni de wrappers previos.
+        if not getattr(client, "_sprint_monitor_training_table_wrapped", False):
+            original_table = client.table
 
-            def insert_with_complementary(self, json, *args, **kwargs):
-                payload = json
-                if (
-                    isinstance(json, dict)
-                    and "athlete_id" in json
-                    and "session_date" in json
-                    and "rpe" in json
-                    and "did_gym" in json
-                ):
-                    payload = dict(json)
-                    plyo_answer = st.session_state.get("training_did_plyo")
-                    sled_answer = st.session_state.get("training_did_sled")
-                    if plyo_answer in {"Sí", "No"}:
-                        payload["did_plyometrics"] = plyo_answer == "Sí"
-                    if sled_answer in {"Sí", "No"}:
-                        payload["did_sled"] = sled_answer == "Sí"
-                    elif "did_sled" not in payload:
-                        payload["did_sled"] = None
-                return original_insert(self, payload, *args, **kwargs)
+            def table_with_training_flags(table_name, *args, **kwargs):
+                builder = original_table(table_name, *args, **kwargs)
+                if table_name == "training_sessions" and not getattr(builder, "_sprint_monitor_flags_wrapped", False):
+                    original_insert = builder.insert
 
-            query_class.insert = insert_with_complementary
-            query_class._sprint_monitor_complementary = True
+                    def insert_training(payload, *insert_args, **insert_kwargs):
+                        if isinstance(payload, dict):
+                            payload = dict(payload)
+                            gym = st.session_state.get("training_did_gym")
+                            plyo = st.session_state.get("training_did_plyo")
+                            sled = st.session_state.get("training_did_sled")
+                            if gym in {"Sí", "No"}:
+                                payload["did_gym"] = gym == "Sí"
+                            if plyo in {"Sí", "No"}:
+                                payload["did_plyometrics"] = plyo == "Sí"
+                            if sled in {"Sí", "No"}:
+                                payload["did_sled"] = sled == "Sí"
+                        return original_insert(payload, *insert_args, **insert_kwargs)
+
+                    builder.insert = insert_training
+                    builder._sprint_monitor_flags_wrapped = True
+                return builder
+
+            client.table = table_with_training_flags
+            client._sprint_monitor_training_table_wrapped = True
     except Exception:
         pass
     return client
@@ -138,7 +141,6 @@ def _get_supabase_with_hurdles():
 _client.get_supabase = _get_supabase_with_hurdles
 
 
-# Mi perfil: mostramos título nativo + foto, sin la sección de marcas.
 if not hasattr(st, "_sprint_monitor_title_after_client"):
     st._sprint_monitor_title_after_client = st.title
 
@@ -159,19 +161,18 @@ def _title_without_profile_marks(body, *args, **kwargs):
 st.title = _title_without_profile_marks
 
 
-# Trabajo complementario: tercera pregunta obligatoria. Usamos directamente el
-# DeltaGenerator principal de Streamlit para evitar wrappers encadenados y keys
-# duplicadas después de un redeploy o rerun.
 def _radio_with_sled(label, options, *args, **kwargs):
     result = st._main.radio(label, options, *args, **kwargs)
     if label == "¿Has hecho pliometría?":
-        st._main.radio(
+        sled_result = st._main.radio(
             "¿Has hecho series con arrastres?",
             ["Sí", "No"],
             horizontal=True,
             index=None,
             key="training_did_sled",
         )
+        if sled_result in {"Sí", "No"}:
+            st.session_state["training_did_sled"] = sled_result
     return result
 
 
@@ -190,9 +191,6 @@ def _button_require_sled(label, *args, **kwargs):
 st.button = _button_require_sled
 
 
-# Ficha del entrenador: creamos UNA sola barra de pestañas. Arrastres aparece
-# entre Series y Gimnasio, pero devolvemos los objetos en el orden lógico que
-# app.py espera para no desplazar Gimnasio, Pliometría, RPE, etc.
 def _tabs_with_sled(labels, *args, **kwargs):
     values = list(labels)
     try:
@@ -228,15 +226,7 @@ def _tabs_with_sled(labels, *args, **kwargs):
                         st.metric("Días con arrastres", len(sled_days))
                         if sled_days:
                             st.dataframe(
-                                [
-                                    {
-                                        "Fecha": row.get("session_date"),
-                                        "Metros": row.get("volume_m"),
-                                        "RPE": row.get("rpe"),
-                                        "Comentarios": row.get("notes"),
-                                    }
-                                    for row in sled_days
-                                ],
+                                [{"Fecha":r.get("session_date"),"Metros":r.get("volume_m"),"RPE":r.get("rpe"),"Comentarios":r.get("notes")} for r in sled_days],
                                 use_container_width=True,
                                 hide_index=True,
                             )
@@ -244,15 +234,8 @@ def _tabs_with_sled(labels, *args, **kwargs):
                             st.info("Todavía no hay entrenamientos registrados con arrastres.")
                     except Exception as exc:
                         st.warning(f"No se pudieron cargar los arrastres: {exc}")
-
-            # display_tabs es una tupla: convertimos los segmentos a listas para
-            # no provocar TypeError. Así evitamos caer al fallback, que era lo que
-            # generaba una segunda barra de pestañas debajo de la primera.
-            logical_tabs = list(display_tabs[:insert_at]) + list(display_tabs[insert_at + 1:]) + [sled_tab]
-            return logical_tabs
+            return list(display_tabs[:insert_at]) + list(display_tabs[insert_at + 1:]) + [sled_tab]
     except Exception as exc:
-        # Si algo falla antes de crear la barra, usamos la barra normal. Si la
-        # barra ya se creó, no generamos una segunda fila visual.
         if "display_tabs" in locals():
             st.warning(f"No se pudo completar la pestaña de arrastres: {exc}")
             return list(display_tabs)
