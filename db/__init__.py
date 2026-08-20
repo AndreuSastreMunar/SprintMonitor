@@ -197,3 +197,65 @@ def _rerun_clear_sled(*args, **kwargs):
 
 
 st.rerun = _rerun_clear_sled
+
+# Ficha del entrenador: añadimos una pestaña adicional al final sin alterar
+# los índices de las pestañas que app.py ya usa. En ella contabilizamos y
+# listamos los entrenamientos en los que el atleta hizo series con arrastres.
+_tabs_after_client = st.tabs
+
+
+def _tabs_with_sled(labels, *args, **kwargs):
+    values = list(labels)
+    try:
+        caller = inspect.currentframe().f_back
+        is_coach_detail = (
+            caller is not None
+            and caller.f_code.co_name == "coach_athlete_detail"
+            and "Gimnasio" in values
+            and "Pliometría" in values
+            and "Entrenamientos" in values
+        )
+        if is_coach_detail and "Arrastres" not in values:
+            tabs = _tabs_after_client(values + ["Arrastres"], *args, **kwargs)
+            aid = caller.f_locals.get("aid")
+            with tabs[-1]:
+                st.subheader("🛷 Arrastres")
+                if not aid:
+                    st.info("No se pudo identificar al atleta.")
+                else:
+                    try:
+                        rows = (
+                            _client.get_supabase().table("training_sessions")
+                            .select("session_date,volume_m,rpe,notes,did_sled")
+                            .eq("athlete_id", aid)
+                            .order("session_date", desc=True)
+                            .limit(200)
+                            .execute().data or []
+                        )
+                        sled_days = [row for row in rows if row.get("did_sled") is True]
+                        st.metric("Días con arrastres", len(sled_days))
+                        if sled_days:
+                            st.dataframe(
+                                [
+                                    {
+                                        "Fecha": row.get("session_date"),
+                                        "Metros": row.get("volume_m"),
+                                        "RPE": row.get("rpe"),
+                                        "Comentarios": row.get("notes"),
+                                    }
+                                    for row in sled_days
+                                ],
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                        else:
+                            st.info("Todavía no hay entrenamientos registrados con arrastres.")
+                    except Exception as exc:
+                        st.warning(f"No se pudieron cargar los arrastres: {exc}")
+            return tabs
+    except Exception:
+        pass
+    return _tabs_after_client(values, *args, **kwargs)
+
+
+st.tabs = _tabs_with_sled
