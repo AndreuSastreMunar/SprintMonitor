@@ -25,24 +25,36 @@ def _extend_options(label, options):
     return values
 
 
-# Antes de importar db.client ampliamos los selectores globales.
-_selectbox_before_client = st.selectbox
+# Conservamos funciones base estables para evitar que los reruns de Streamlit
+# encadenen wrappers sobre wrappers y generen widgets duplicados.
+if not hasattr(st, "_sprint_monitor_base_selectbox"):
+    st._sprint_monitor_base_selectbox = st.selectbox
+if not hasattr(st, "_sprint_monitor_base_radio"):
+    st._sprint_monitor_base_radio = st.radio
+if not hasattr(st, "_sprint_monitor_base_button"):
+    st._sprint_monitor_base_button = st.button
+if not hasattr(st, "_sprint_monitor_base_rerun"):
+    st._sprint_monitor_base_rerun = st.rerun
+if not hasattr(st, "_sprint_monitor_base_tabs"):
+    st._sprint_monitor_base_tabs = st.tabs
 
 
 def _selectbox_before_import(label, options, *args, **kwargs):
-    return _selectbox_before_client(label, _extend_options(label, options), *args, **kwargs)
+    return st._sprint_monitor_base_selectbox(label, _extend_options(label, options), *args, **kwargs)
 
 
 st.selectbox = _selectbox_before_import
 
 from . import client as _client  # noqa: E402
 
-# db.client instala sus propios wrappers, así que encadenamos los nuestros después.
-_selectbox_after_client = st.selectbox
+# db.client puede instalar sus propios wrappers. Guardamos el selector resultante
+# una sola vez y añadimos las pruebas de vallas encima.
+if not hasattr(st, "_sprint_monitor_selectbox_after_client"):
+    st._sprint_monitor_selectbox_after_client = st.selectbox
 
 
 def _selectbox_with_hurdles(label, options, *args, **kwargs):
-    return _selectbox_after_client(label, _extend_options(label, options), *args, **kwargs)
+    return st._sprint_monitor_selectbox_after_client(label, _extend_options(label, options), *args, **kwargs)
 
 
 st.selectbox = _selectbox_with_hurdles
@@ -58,9 +70,10 @@ if not getattr(DeltaGenerator.selectbox, "_sprint_monitor_hurdles", False):
     _delta_selectbox_with_hurdles._sprint_monitor_hurdles = True
     DeltaGenerator.selectbox = _delta_selectbox_with_hurdles
 
-# app.py conserva MARK_EVENTS con las cuatro pruebas originales. Ampliamos
-# únicamente los recorridos que dibujan marcas para incluir vallas.
-_original_enumerate = builtins.enumerate
+
+# Amplía las tarjetas de marcas a las pruebas de vallas.
+if not hasattr(builtins, "_sprint_monitor_original_enumerate"):
+    builtins._sprint_monitor_original_enumerate = builtins.enumerate
 
 
 def _enumerate_with_hurdles(iterable, *args):
@@ -74,14 +87,13 @@ def _enumerate_with_hurdles(iterable, *args):
             iterable = _ALL_MARK_EVENTS
     except Exception:
         pass
-    return _original_enumerate(iterable, *args)
+    return builtins._sprint_monitor_original_enumerate(iterable, *args)
 
 
 builtins.enumerate = _enumerate_with_hurdles
 
-# También ampliamos el filtro de competiciones para que las pruebas de vallas
-# entren en los cálculos de marcas. En la misma capa añadimos did_sled a las
-# inserciones de training_sessions sin tener que duplicar la lógica de app.py.
+
+# Amplía filtros de marcas y añade did_sled al guardar training_sessions.
 _original_get_supabase = _client.get_supabase
 
 
@@ -131,9 +143,10 @@ def _get_supabase_with_hurdles():
 
 _client.get_supabase = _get_supabase_with_hurdles
 
-# Corrección definitiva de Mi perfil: usamos el título nativo y mostramos solo
-# la foto. Así evitamos que el wrapper antiguo de db.client añada Marcas.
-_title_after_client = st.title
+
+# Mi perfil: mostramos título nativo + foto, sin la sección de marcas.
+if not hasattr(st, "_sprint_monitor_title_after_client"):
+    st._sprint_monitor_title_after_client = st.title
 
 
 def _title_without_profile_marks(body, *args, **kwargs):
@@ -146,20 +159,18 @@ def _title_without_profile_marks(body, *args, **kwargs):
         except Exception:
             pass
         return result
-    return _title_after_client(body, *args, **kwargs)
+    return st._sprint_monitor_title_after_client(body, *args, **kwargs)
 
 
 st.title = _title_without_profile_marks
 
-# Trabajo complementario: añadimos la tercera pregunta justo después de
-# pliometría. La respuesta es obligatoria antes de guardar el entrenamiento.
-_radio_after_client = st.radio
 
-
+# Trabajo complementario: tercera pregunta obligatoria. Se usa siempre la
+# función base de radio para que el mismo key no se registre dos veces.
 def _radio_with_sled(label, options, *args, **kwargs):
-    result = _radio_after_client(label, options, *args, **kwargs)
+    result = st._sprint_monitor_base_radio(label, options, *args, **kwargs)
     if label == "¿Has hecho pliometría?":
-        _radio_after_client(
+        st._sprint_monitor_base_radio(
             "¿Has hecho series con arrastres?",
             ["Sí", "No"],
             horizontal=True,
@@ -171,11 +182,9 @@ def _radio_with_sled(label, options, *args, **kwargs):
 
 st.radio = _radio_with_sled
 
-_button_after_client = st.button
-
 
 def _button_require_sled(label, *args, **kwargs):
-    clicked = _button_after_client(label, *args, **kwargs)
+    clicked = st._sprint_monitor_base_button(label, *args, **kwargs)
     if label == "💾 Guardar entrenamiento" and clicked:
         if st.session_state.get("training_did_sled") not in {"Sí", "No"}:
             st.warning("Debes responder si has hecho series con arrastres antes de guardar.")
@@ -185,26 +194,18 @@ def _button_require_sled(label, *args, **kwargs):
 
 st.button = _button_require_sled
 
-# Al guardar correctamente un entrenamiento limpiamos también esta respuesta
-# para que en la siguiente sesión vuelva a ser obligatoria.
-_rerun_after_client = st.rerun
-
 
 def _rerun_clear_sled(*args, **kwargs):
     if st.session_state.get("flash_message") == "Entrenamiento guardado correctamente.":
         st.session_state.pop("training_did_sled", None)
-    return _rerun_after_client(*args, **kwargs)
+    return st._sprint_monitor_base_rerun(*args, **kwargs)
 
 
 st.rerun = _rerun_clear_sled
 
-# Ficha del entrenador: mostramos Arrastres entre Series y Gimnasio. Para no
-# romper los índices que app.py usa para el resto de pestañas, devolvemos los
-# tabs en el orden lógico antiguo y dejamos Arrastres como tab adicional al final
-# de la lista devuelta, aunque visualmente aparezca en la posición deseada.
-_tabs_after_client = st.tabs
 
-
+# Ficha del entrenador: Arrastres se ve entre Series y Gimnasio sin alterar
+# los índices lógicos que app.py usa para las demás pestañas.
 def _tabs_with_sled(labels, *args, **kwargs):
     values = list(labels)
     try:
@@ -219,7 +220,7 @@ def _tabs_with_sled(labels, *args, **kwargs):
         if is_coach_detail and "Arrastres" not in values:
             insert_at = values.index("Gimnasio")
             display_values = values[:insert_at] + ["Arrastres"] + values[insert_at:]
-            display_tabs = _tabs_after_client(display_values, *args, **kwargs)
+            display_tabs = st._sprint_monitor_base_tabs(display_values, *args, **kwargs)
             sled_tab = display_tabs[insert_at]
             aid = caller.f_locals.get("aid")
             with sled_tab:
@@ -257,13 +258,10 @@ def _tabs_with_sled(labels, *args, **kwargs):
                     except Exception as exc:
                         st.warning(f"No se pudieron cargar los arrastres: {exc}")
 
-            # app.py espera que tabs[3] siga siendo Gimnasio, tabs[4]
-            # Pliometría, etc. Reordenamos solo la lista devuelta, no la vista.
-            logical_tabs = display_tabs[:insert_at] + display_tabs[insert_at + 1:] + [sled_tab]
-            return logical_tabs
+            return display_tabs[:insert_at] + display_tabs[insert_at + 1:] + [sled_tab]
     except Exception:
         pass
-    return _tabs_after_client(values, *args, **kwargs)
+    return st._sprint_monitor_base_tabs(values, *args, **kwargs)
 
 
 st.tabs = _tabs_with_sled
