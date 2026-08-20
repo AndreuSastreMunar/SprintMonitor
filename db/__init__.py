@@ -80,7 +80,8 @@ def _enumerate_with_hurdles(iterable, *args):
 builtins.enumerate = _enumerate_with_hurdles
 
 # También ampliamos el filtro de competiciones para que las pruebas de vallas
-# entren en los cálculos de marcas.
+# entren en los cálculos de marcas. En la misma capa añadimos did_sled a las
+# inserciones de training_sessions sin tener que duplicar la lógica de app.py.
 _original_get_supabase = _client.get_supabase
 
 
@@ -101,6 +102,28 @@ def _get_supabase_with_hurdles():
 
             query_class.in_ = in_with_hurdles
             query_class._sprint_monitor_hurdles = True
+
+        if not getattr(query_class, "_sprint_monitor_sled", False):
+            original_insert = query_class.insert
+
+            def insert_with_sled(self, json, *args, **kwargs):
+                payload = json
+                if (
+                    isinstance(json, dict)
+                    and "athlete_id" in json
+                    and "session_date" in json
+                    and "rpe" in json
+                    and "did_gym" in json
+                    and "did_plyometrics" in json
+                    and "did_sled" not in json
+                ):
+                    payload = dict(json)
+                    answer = st.session_state.get("training_did_sled")
+                    payload["did_sled"] = answer == "Sí" if answer in {"Sí", "No"} else None
+                return original_insert(self, payload, *args, **kwargs)
+
+            query_class.insert = insert_with_sled
+            query_class._sprint_monitor_sled = True
     except Exception:
         pass
     return client
@@ -127,3 +150,50 @@ def _title_without_profile_marks(body, *args, **kwargs):
 
 
 st.title = _title_without_profile_marks
+
+# Trabajo complementario: añadimos la tercera pregunta justo después de
+# pliometría. La respuesta es obligatoria antes de guardar el entrenamiento.
+_radio_after_client = st.radio
+
+
+def _radio_with_sled(label, options, *args, **kwargs):
+    result = _radio_after_client(label, options, *args, **kwargs)
+    if label == "¿Has hecho pliometría?":
+        _radio_after_client(
+            "¿Has hecho series con arrastres?",
+            ["Sí", "No"],
+            horizontal=True,
+            index=None,
+            key="training_did_sled",
+        )
+    return result
+
+
+st.radio = _radio_with_sled
+
+_button_after_client = st.button
+
+
+def _button_require_sled(label, *args, **kwargs):
+    clicked = _button_after_client(label, *args, **kwargs)
+    if label == "💾 Guardar entrenamiento" and clicked:
+        if st.session_state.get("training_did_sled") not in {"Sí", "No"}:
+            st.warning("Debes responder si has hecho series con arrastres antes de guardar.")
+            return False
+    return clicked
+
+
+st.button = _button_require_sled
+
+# Al guardar correctamente un entrenamiento limpiamos también esta respuesta
+# para que en la siguiente sesión vuelva a ser obligatoria.
+_rerun_after_client = st.rerun
+
+
+def _rerun_clear_sled(*args, **kwargs):
+    if st.session_state.get("flash_message") == "Entrenamiento guardado correctamente.":
+        st.session_state.pop("training_did_sled", None)
+    return _rerun_after_client(*args, **kwargs)
+
+
+st.rerun = _rerun_clear_sled
