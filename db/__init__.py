@@ -240,8 +240,6 @@ def _render_profile_marks(uid, key_prefix):
                 st.caption(f"MP: {_mark_caption(pb)}")
                 st.caption(f"MT: {_mark_caption(sb)}")
 
-    # También mostramos el historial completo de marcas que el atleta ha ido
-    # registrando en Mi evolución > Marcas, no solo la mejor.
     manual_rows = [row for row in rows if row.get("source") == "Marca añadida en Mi evolución"]
     if manual_rows:
         st.markdown("### Historial de marcas registradas")
@@ -257,6 +255,15 @@ def _render_profile_marks(uid, key_prefix):
         st.dataframe(history[["Fecha", "Prueba", "Marca (s)", "Comentario"]], use_container_width=True, hide_index=True)
 
 
-# La pantalla "Mi perfil" usa _client._render_marks desde el parche de título
-# de db.client. Sustituimos ese renderer para incluir marcas manuales, vallas e historial.
-_client._render_marks = _render_profile_marks
+# Mi perfil del atleta conserva foto y datos básicos, pero ya no muestra marcas.
+# El coach sigue pudiendo consultar las marcas desde la ficha del atleta.
+_original_client_render_marks = _client._render_marks
+
+
+def _render_marks_without_athlete_profile(uid, key_prefix):
+    if key_prefix == "athlete_profile":
+        return None
+    return _render_profile_marks(uid, key_prefix)
+
+
+_client._render_marks = _render_marks_without_athlete_profile
