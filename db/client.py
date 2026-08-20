@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, ImageOps
 from supabase import create_client, Client
+from streamlit.delta_generator import DeltaGenerator
 
 
 # Formato visual español en toda la app.
@@ -146,25 +147,38 @@ if not getattr(st.line_chart, "_sprint_monitor_fixed_rpe", False):
 _HURDLE_EVENTS = ["60m vallas", "110m vallas"]
 
 
-def _selectbox_with_events(label, options, *args, **kwargs):
+def _extended_event_options(label, options):
     values = list(options)
     if label == "Especialidad":
         for value in ["400 m", "60 m vallas", "110 m vallas"]:
             if value not in values:
                 values.append(value)
-        profile = st.session_state.get("profile") or {}
-        current = profile.get("specialty")
-        if current in values:
-            kwargs["index"] = values.index(current)
     elif label == "Prueba":
-        # Se aplica tanto a Competición como a Mi evolución > Añadir marca.
         base_events = {"60m", "100m", "200m", "400m"}
         if base_events.issubset(set(values)):
             insert_at = values.index("4x100") if "4x100" in values else (values.index("other") if "other" in values else len(values))
             for value in reversed(_HURDLE_EVENTS):
                 if value not in values:
                     values.insert(insert_at, value)
+    return values
+
+
+def _selectbox_with_events(label, options, *args, **kwargs):
+    values = _extended_event_options(label, options)
+    if label == "Especialidad":
+        profile = st.session_state.get("profile") or {}
+        current = profile.get("specialty")
+        if current in values:
+            kwargs["index"] = values.index(current)
     return _original_selectbox(label, values, *args, **kwargs)
+
+
+# Los selectores creados dentro de st.columns usan DeltaGenerator.selectbox.
+_original_delta_selectbox = DeltaGenerator.selectbox
+
+
+def _delta_selectbox_with_events(self, label, options, *args, **kwargs):
+    return _original_delta_selectbox(self, label, _extended_event_options(label, options), *args, **kwargs)
 
 
 # Foto de perfil ligera.
@@ -247,7 +261,7 @@ def _mark_rows(uid):
             rows.append({
                 "event": r.get("event"), "result_seconds": r.get("result_seconds"),
                 "mark_date": r.get("competition_date"), "source": r.get("competition_name") or "Competición",
-                "wind": r.get("wind"),
+                "wind": r.get("wind"), "manual": False, "notes": None,
             })
     except Exception:
         pass
@@ -261,12 +275,10 @@ def _mark_rows(uid):
             .execute().data or []
         )
         for r in manual:
-            source = "Marca añadida por el atleta"
-            if r.get("notes"):
-                source += f" · {r.get('notes')}"
             rows.append({
                 "event": r.get("event"), "result_seconds": r.get("mark_seconds"),
-                "mark_date": r.get("mark_date"), "source": source, "wind": None,
+                "mark_date": r.get("mark_date"), "source": "Marca añadida en Mi evolución",
+                "wind": None, "manual": True, "notes": r.get("notes"),
             })
     except Exception:
         pass
@@ -304,10 +316,14 @@ def _mark_caption(row):
             extras.append(f"viento {float(wind):+.1f} m/s")
         except Exception:
             pass
+    if row.get("notes"):
+        extras.append(str(row.get("notes")))
     return " · ".join(extras) if extras else "Marca registrada"
 
 
 def _render_marks(uid, key_prefix):
+    # Consulta Supabase en cada render: no hay caché, por lo que Mi perfil refleja
+    # inmediatamente las marcas añadidas en Mi evolución.
     rows = _mark_rows(uid)
     df = pd.DataFrame(rows)
     current_start = _season_start_for_date(pd.Timestamp.today())
@@ -324,7 +340,7 @@ def _render_marks(uid, key_prefix):
     selected_start = season_starts[labels.index(selected_label)]
     season_from = pd.Timestamp(year=selected_start, month=_SEASON_START_MONTH, day=1)
     season_to = pd.Timestamp(year=selected_start + 1, month=_SEASON_START_MONTH, day=1)
-    st.caption("La marca personal usa todos los registros. La marca de la temporada usa la temporada seleccionada.")
+    st.caption("Las marcas se actualizan automáticamente con los registros de Mi evolución. La marca personal usa todos los registros y la marca de temporada usa la temporada seleccionada.")
     cols = st.columns(2)
     for index, event in enumerate(_MARK_EVENTS):
         event_df = df[df["event"] == event].copy() if not df.empty else pd.DataFrame()
@@ -343,6 +359,16 @@ def _render_marks(uid, key_prefix):
                 st.caption(f"MP: {_mark_caption(pb)}")
                 st.caption(f"MT: {_mark_caption(sb)}")
 
+    manual_rows = [row for row in rows if row.get("manual")]
+    if manual_rows:
+        st.markdown("### Historial de marcas registradas")
+        history = pd.DataFrame(manual_rows)
+        history["mark_date"] = pd.to_datetime(history["mark_date"], errors="coerce")
+        history = history.sort_values("mark_date", ascending=False).rename(columns={
+            "mark_date": "Fecha", "event": "Prueba", "result_seconds": "Marca (s)", "notes": "Comentario",
+        })
+        st.dataframe(history[["Fecha", "Prueba", "Marca (s)", "Comentario"]], use_container_width=True, hide_index=True)
+
 
 def _title_with_profile_photo(body, *args, **kwargs):
     result = _original_title(body, *args, **kwargs)
@@ -356,8 +382,8 @@ def _title_with_profile_photo(body, *args, **kwargs):
             athlete = st.session_state.get("selected_athlete")
             if athlete and athlete.get("id"):
                 _show_avatar(athlete["id"], editable=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        st.warning(f"No se pudieron actualizar las marcas del perfil: {exc}")
     return result
 
 
@@ -384,6 +410,9 @@ def _tabs_with_coach_marks(labels, *args, **kwargs):
 if not getattr(st.selectbox, "_sprint_monitor_events", False):
     _selectbox_with_events._sprint_monitor_events = True
     st.selectbox = _selectbox_with_events
+if not getattr(DeltaGenerator.selectbox, "_sprint_monitor_events", False):
+    _delta_selectbox_with_events._sprint_monitor_events = True
+    DeltaGenerator.selectbox = _delta_selectbox_with_events
 if not getattr(st.title, "_sprint_monitor_profile_photo", False):
     _title_with_profile_photo._sprint_monitor_profile_photo = True
     st.title = _title_with_profile_photo
