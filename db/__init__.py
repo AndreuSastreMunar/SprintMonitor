@@ -198,9 +198,10 @@ def _rerun_clear_sled(*args, **kwargs):
 
 st.rerun = _rerun_clear_sled
 
-# Ficha del entrenador: añadimos una pestaña adicional al final sin alterar
-# los índices de las pestañas que app.py ya usa. En ella contabilizamos y
-# listamos los entrenamientos en los que el atleta hizo series con arrastres.
+# Ficha del entrenador: mostramos Arrastres entre Series y Gimnasio. Para no
+# romper los índices que app.py usa para el resto de pestañas, devolvemos los
+# tabs en el orden lógico antiguo y dejamos Arrastres como tab adicional al final
+# de la lista devuelta, aunque visualmente aparezca en la posición deseada.
 _tabs_after_client = st.tabs
 
 
@@ -216,9 +217,12 @@ def _tabs_with_sled(labels, *args, **kwargs):
             and "Entrenamientos" in values
         )
         if is_coach_detail and "Arrastres" not in values:
-            tabs = _tabs_after_client(values + ["Arrastres"], *args, **kwargs)
+            insert_at = values.index("Gimnasio")
+            display_values = values[:insert_at] + ["Arrastres"] + values[insert_at:]
+            display_tabs = _tabs_after_client(display_values, *args, **kwargs)
+            sled_tab = display_tabs[insert_at]
             aid = caller.f_locals.get("aid")
-            with tabs[-1]:
+            with sled_tab:
                 st.subheader("🛷 Arrastres")
                 if not aid:
                     st.info("No se pudo identificar al atleta.")
@@ -252,7 +256,11 @@ def _tabs_with_sled(labels, *args, **kwargs):
                             st.info("Todavía no hay entrenamientos registrados con arrastres.")
                     except Exception as exc:
                         st.warning(f"No se pudieron cargar los arrastres: {exc}")
-            return tabs
+
+            # app.py espera que tabs[3] siga siendo Gimnasio, tabs[4]
+            # Pliometría, etc. Reordenamos solo la lista devuelta, no la vista.
+            logical_tabs = display_tabs[:insert_at] + display_tabs[insert_at + 1:] + [sled_tab]
+            return logical_tabs
     except Exception:
         pass
     return _tabs_after_client(values, *args, **kwargs)
