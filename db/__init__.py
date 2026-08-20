@@ -83,11 +83,46 @@ builtins.enumerate = _enumerate_with_hurdles
 _original_get_supabase = _client.get_supabase
 
 
+class _TrainingTableProxy:
+    def __init__(self, builder):
+        self._builder = builder
+
+    def __getattr__(self, name):
+        return getattr(self._builder, name)
+
+    def insert(self, payload, *args, **kwargs):
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            gym = st.session_state.get("training_did_gym")
+            plyo = st.session_state.get("training_did_plyo")
+            sled = st.session_state.get("training_did_sled")
+            if gym in {"Sí", "No"}:
+                payload["did_gym"] = gym == "Sí"
+            if plyo in {"Sí", "No"}:
+                payload["did_plyometrics"] = plyo == "Sí"
+            if sled in {"Sí", "No"}:
+                payload["did_sled"] = sled == "Sí"
+        return self._builder.insert(payload, *args, **kwargs)
+
+
+class _SupabaseProxy:
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def table(self, table_name, *args, **kwargs):
+        builder = self._client.table(table_name, *args, **kwargs)
+        if table_name == "training_sessions":
+            return _TrainingTableProxy(builder)
+        return builder
+
+
 def _get_supabase_with_hurdles():
     client = _original_get_supabase()
     try:
         query_class = type(client.table("competitions"))
-
         if not getattr(query_class, "_sprint_monitor_hurdles", False):
             original_in = query_class.in_
 
@@ -101,38 +136,9 @@ def _get_supabase_with_hurdles():
 
             query_class.in_ = in_with_hurdles
             query_class._sprint_monitor_hurdles = True
-
-        # Parche de clase, no de instancia: cualquier INSERT de training_sessions
-        # recibe los tres indicadores exactamente como están en el formulario.
-        if not getattr(query_class, "_sprint_monitor_training_flags", False):
-            original_insert = query_class.insert
-
-            def insert_with_training_flags(self, payload, *args, **kwargs):
-                if (
-                    isinstance(payload, dict)
-                    and "athlete_id" in payload
-                    and "session_date" in payload
-                    and "rpe" in payload
-                    and "did_gym" in payload
-                    and "did_plyometrics" in payload
-                ):
-                    payload = dict(payload)
-                    gym = st.session_state.get("training_did_gym")
-                    plyo = st.session_state.get("training_did_plyo")
-                    sled = st.session_state.get("training_did_sled")
-                    if gym in {"Sí", "No"}:
-                        payload["did_gym"] = gym == "Sí"
-                    if plyo in {"Sí", "No"}:
-                        payload["did_plyometrics"] = plyo == "Sí"
-                    if sled in {"Sí", "No"}:
-                        payload["did_sled"] = sled == "Sí"
-                return original_insert(self, payload, *args, **kwargs)
-
-            query_class.insert = insert_with_training_flags
-            query_class._sprint_monitor_training_flags = True
     except Exception:
         pass
-    return client
+    return _SupabaseProxy(client)
 
 
 _client.get_supabase = _get_supabase_with_hurdles
