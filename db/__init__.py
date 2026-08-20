@@ -3,6 +3,7 @@
 import builtins
 import inspect
 
+import pandas as pd
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
@@ -226,8 +227,22 @@ def _tabs_with_sled(labels, *args, **kwargs):
                         sled_days = [row for row in rows if row.get("did_sled") is True]
                         st.metric("Días con arrastres", len(sled_days))
                         if sled_days:
+                            sled_df = pd.DataFrame(
+                                [
+                                    {
+                                        "session_date": r.get("session_date"),
+                                        "volume_m": r.get("volume_m"),
+                                        "rpe": r.get("rpe"),
+                                        "notes": r.get("notes"),
+                                    }
+                                    for r in sled_days
+                                ]
+                            )
+                            sled_df["session_date"] = pd.to_datetime(
+                                sled_df["session_date"], errors="coerce"
+                            ).dt.strftime("%d/%m/%Y")
                             st.dataframe(
-                                [{"Fecha":r.get("session_date"),"Metros":r.get("volume_m"),"RPE":r.get("rpe"),"Comentarios":r.get("notes")} for r in sled_days],
+                                sled_df,
                                 use_container_width=True,
                                 hide_index=True,
                             )
