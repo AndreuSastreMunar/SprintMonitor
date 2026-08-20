@@ -83,6 +83,30 @@ builtins.enumerate = _enumerate_with_hurdles
 _original_get_supabase = _client.get_supabase
 
 
+class _TrainingTableProxy:
+    """Delegado que modifica solo los INSERT de training_sessions."""
+
+    def __init__(self, builder):
+        self._builder = builder
+
+    def __getattr__(self, name):
+        return getattr(self._builder, name)
+
+    def insert(self, payload, *args, **kwargs):
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            gym = st.session_state.get("training_did_gym")
+            plyo = st.session_state.get("training_did_plyo")
+            sled = st.session_state.get("training_did_sled")
+            if gym in {"Sí", "No"}:
+                payload["did_gym"] = gym == "Sí"
+            if plyo in {"Sí", "No"}:
+                payload["did_plyometrics"] = plyo == "Sí"
+            if sled in {"Sí", "No"}:
+                payload["did_sled"] = sled == "Sí"
+        return self._builder.insert(payload, *args, **kwargs)
+
+
 def _get_supabase_with_hurdles():
     client = _original_get_supabase()
     try:
@@ -106,25 +130,8 @@ def _get_supabase_with_hurdles():
 
             def table_with_training_flags(table_name, *args, **kwargs):
                 builder = original_table(table_name, *args, **kwargs)
-                if table_name == "training_sessions" and not getattr(builder, "_sprint_monitor_flags_wrapped", False):
-                    original_insert = builder.insert
-
-                    def insert_training(payload, *insert_args, **insert_kwargs):
-                        if isinstance(payload, dict):
-                            payload = dict(payload)
-                            gym = st.session_state.get("training_did_gym")
-                            plyo = st.session_state.get("training_did_plyo")
-                            sled = st.session_state.get("training_did_sled")
-                            if gym in {"Sí", "No"}:
-                                payload["did_gym"] = gym == "Sí"
-                            if plyo in {"Sí", "No"}:
-                                payload["did_plyometrics"] = plyo == "Sí"
-                            if sled in {"Sí", "No"}:
-                                payload["did_sled"] = sled == "Sí"
-                        return original_insert(payload, *insert_args, **insert_kwargs)
-
-                    builder.insert = insert_training
-                    builder._sprint_monitor_flags_wrapped = True
+                if table_name == "training_sessions":
+                    return _TrainingTableProxy(builder)
                 return builder
 
             client.table = table_with_training_flags
@@ -160,9 +167,6 @@ st.title = _title_without_profile_marks
 def _radio_with_sled(label, options, *args, **kwargs):
     result = st._main.radio(label, options, *args, **kwargs)
     if label == "¿Has hecho pliometría?":
-        # El propio widget con key="training_did_sled" mantiene su valor en
-        # st.session_state. No debemos reasignar esa key después de crear el
-        # widget, porque Streamlit lanza StreamlitAPIException.
         st._main.radio(
             "¿Has hecho series con arrastres?",
             ["Sí", "No"],
