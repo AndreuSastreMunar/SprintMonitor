@@ -5,17 +5,14 @@ import inspect
 
 import pandas as pd
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
 _BASE_MARK_EVENTS = ["60m", "100m", "200m", "400m"]
 _HURDLE_EVENTS = ["60m vallas", "110m vallas"]
 _ALL_MARK_EVENTS = _BASE_MARK_EVENTS + _HURDLE_EVENTS
 
-# Durante la importación de db.client conservamos la ampliación de selectores
-# para que también quede encadenada con sus parches de fechas/foto/400 m.
-_selectbox_before_client = st.selectbox
 
-
-def _selectbox_before_import(label, options, *args, **kwargs):
+def _extend_options(label, options):
     values = list(options)
     if label == "Prueba" and all(event in values for event in _BASE_MARK_EVENTS):
         for event in _HURDLE_EVENTS:
@@ -26,7 +23,15 @@ def _selectbox_before_import(label, options, *args, **kwargs):
         for specialty in ["60 m vallas", "110 m vallas"]:
             if specialty not in values:
                 values.append(specialty)
-    return _selectbox_before_client(label, values, *args, **kwargs)
+    return values
+
+
+# Durante la importación de db.client conservamos la ampliación del selectbox global.
+_selectbox_before_client = st.selectbox
+
+
+def _selectbox_before_import(label, options, *args, **kwargs):
+    return _selectbox_before_client(label, _extend_options(label, options), *args, **kwargs)
 
 
 st.selectbox = _selectbox_before_import
@@ -34,26 +39,29 @@ st.selectbox = _selectbox_before_import
 from . import client as _client  # noqa: E402
 
 # db.client sustituye st.selectbox al terminar de importarse. Añadimos una
-# segunda capa para garantizar que los formularios definidos en app.py vean
-# las pruebas de vallas, incluido "Mi evolución > Añadir marca".
+# segunda capa para el selectbox global.
 _selectbox_after_client = st.selectbox
 
 
 def _selectbox_with_hurdles(label, options, *args, **kwargs):
-    values = list(options)
-    if label == "Prueba" and all(event in values for event in _BASE_MARK_EVENTS):
-        for event in _HURDLE_EVENTS:
-            if event not in values:
-                insert_at = values.index("4x100") if "4x100" in values else (values.index("other") if "other" in values else len(values))
-                values.insert(insert_at, event)
-    elif label == "Especialidad":
-        for specialty in ["60 m vallas", "110 m vallas"]:
-            if specialty not in values:
-                values.append(specialty)
-    return _selectbox_after_client(label, values, *args, **kwargs)
+    return _selectbox_after_client(label, _extend_options(label, options), *args, **kwargs)
 
 
 st.selectbox = _selectbox_with_hurdles
+
+# IMPORTANTE: los selectores creados dentro de columnas usan
+# DeltaGenerator.selectbox (por ejemplo c1.selectbox), no st.selectbox.
+# Esta era la razón por la que "Añadir marca" seguía mostrando solo 4 pruebas.
+_delta_selectbox_original = DeltaGenerator.selectbox
+
+
+def _delta_selectbox_with_hurdles(self, label, options, *args, **kwargs):
+    return _delta_selectbox_original(self, label, _extend_options(label, options), *args, **kwargs)
+
+
+if not getattr(DeltaGenerator.selectbox, "_sprint_monitor_hurdles", False):
+    _delta_selectbox_with_hurdles._sprint_monitor_hurdles = True
+    DeltaGenerator.selectbox = _delta_selectbox_with_hurdles
 
 # app.py conserva MARK_EVENTS con las cuatro pruebas originales. Cuando su
 # renderer de marcas recorre esa lista, ampliamos únicamente ese recorrido.
@@ -186,7 +194,7 @@ def _profile_mark_rows(uid):
                 "event": row.get("event"),
                 "mark_seconds": row.get("mark_seconds"),
                 "mark_date": row.get("mark_date"),
-                "source": "Marca añadida por el atleta",
+                "source": "Marca añadida en Mi evolución",
                 "wind": None,
                 "notes": row.get("notes"),
             })
@@ -232,7 +240,23 @@ def _render_profile_marks(uid, key_prefix):
                 st.caption(f"MP: {_mark_caption(pb)}")
                 st.caption(f"MT: {_mark_caption(sb)}")
 
+    # También mostramos el historial completo de marcas que el atleta ha ido
+    # registrando en Mi evolución > Marcas, no solo la mejor.
+    manual_rows = [row for row in rows if row.get("source") == "Marca añadida en Mi evolución"]
+    if manual_rows:
+        st.markdown("### Historial de marcas registradas")
+        history = pd.DataFrame(manual_rows)
+        history["mark_date"] = pd.to_datetime(history["mark_date"], errors="coerce")
+        history = history.sort_values("mark_date", ascending=False)
+        history = history.rename(columns={
+            "mark_date": "Fecha",
+            "event": "Prueba",
+            "mark_seconds": "Marca (s)",
+            "notes": "Comentario",
+        })
+        st.dataframe(history[["Fecha", "Prueba", "Marca (s)", "Comentario"]], use_container_width=True, hide_index=True)
+
 
 # La pantalla "Mi perfil" usa _client._render_marks desde el parche de título
-# de db.client. Sustituimos ese renderer para incluir marcas manuales y vallas.
+# de db.client. Sustituimos ese renderer para incluir marcas manuales, vallas e historial.
 _client._render_marks = _render_profile_marks
