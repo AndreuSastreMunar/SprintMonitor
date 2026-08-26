@@ -302,3 +302,20 @@ def _form_without_profile_key_collision(key, *args, **kwargs):
 
 
 st.form = _form_without_profile_key_collision
+
+
+# En un st.form los cambios de un checkbox no fuerzan un rerun inmediato.
+# Por eso el campo "Fin de la menstruación" podía quedar deshabilitado aunque
+# se marcase "Ya ha finalizado". Lo mantenemos editable y, si no ha finalizado,
+# app.py seguirá guardando end_date como None.
+if not hasattr(st, "_sprint_monitor_base_date_input"):
+    st._sprint_monitor_base_date_input = st.date_input
+
+
+def _date_input_cycle_end_enabled(label, *args, **kwargs):
+    if label == "Fin de la menstruación":
+        kwargs["disabled"] = False
+    return st._sprint_monitor_base_date_input(label, *args, **kwargs)
+
+
+st.date_input = _date_input_cycle_end_enabled
