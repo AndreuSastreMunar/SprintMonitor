@@ -259,3 +259,31 @@ def _tabs_with_sled(labels, *args, **kwargs):
 
 
 st.tabs = _tabs_with_sled
+
+
+# Referencias visuales para los sliders de Wellness.
+if not hasattr(st, "_sprint_monitor_base_slider"):
+    st._sprint_monitor_base_slider = st.slider
+
+_WELLNESS_SLIDER_REFERENCES = {
+    "Sueño": ("Muy bueno", "Muy malo"),
+    "Fatiga": ("Muy bajo", "Muy alto"),
+    "Dolor muscular": ("Muy bajo", "Muy alto"),
+    "Estrés": ("Muy bajo", "Muy alto"),
+    "Disposición para entrenar": ("Muy bajo", "Muy alto"),
+}
+
+
+def _slider_with_wellness_references(label, *args, **kwargs):
+    value = st._sprint_monitor_base_slider(label, *args, **kwargs)
+    references = _WELLNESS_SLIDER_REFERENCES.get(label)
+    if references:
+        left, right = references
+        st.markdown(
+            f'<div style="display:flex;justify-content:space-between;margin-top:-0.65rem;margin-bottom:0.7rem;font-size:0.82rem;opacity:0.72;"><span>{left}</span><span>{right}</span></div>',
+            unsafe_allow_html=True,
+        )
+    return value
+
+
+st.slider = _slider_with_wellness_references
