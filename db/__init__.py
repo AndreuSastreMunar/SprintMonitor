@@ -287,3 +287,18 @@ def _slider_with_wellness_references(label, *args, **kwargs):
 
 
 st.slider = _slider_with_wellness_references
+
+
+# Evita que el formulario de Mi perfil use la misma clave que
+# st.session_state.profile, que contiene los datos del usuario.
+if not hasattr(st, "_sprint_monitor_base_form"):
+    st._sprint_monitor_base_form = st.form
+
+
+def _form_without_profile_key_collision(key, *args, **kwargs):
+    if key == "profile":
+        key = "profile_form"
+    return st._sprint_monitor_base_form(key, *args, **kwargs)
+
+
+st.form = _form_without_profile_key_collision
