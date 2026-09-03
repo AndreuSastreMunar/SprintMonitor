@@ -70,5 +70,21 @@ def _markdown_with_single_login(body, *args, **kwargs):
 
 st.markdown = _markdown_with_single_login
 
+# En las pantallas interiores dejamos más aire arriba para que el primer
+# botón (Volver al inicio / Volver a Mis atletas) no quede oculto por la
+# cabecera fija de Streamlit. El login mantiene su espaciado propio.
+_original_markdown(r'''
+<style>
+div[data-testid="stAppViewContainer"] .block-container:not(:has(.cteib-login)){
+  padding-top:10rem!important;
+}
+@media(max-width:700px){
+  div[data-testid="stAppViewContainer"] .block-container:not(:has(.cteib-login)){
+    padding-top:8.2rem!important;
+  }
+}
+</style>
+''', unsafe_allow_html=True)
+
 # Ejecuta toda la aplicación original cada vez que Streamlit hace rerun.
 runpy.run_path("legacy_app.py", run_name="__main__")
