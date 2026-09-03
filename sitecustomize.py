@@ -40,5 +40,17 @@ try:
             branding.install_visual_branding()
     except Exception:
         pass
+
+    # Pantalla de acceso móvil: sustituye únicamente la cabecera antigua del
+    # login y estiliza los formularios de Entrar / Crear cuenta.
+    try:
+        login_path = Path(__file__).resolve().parent / "db" / "login_branding.py"
+        login_spec = importlib.util.spec_from_file_location("sprintmonitor_login_branding", login_path)
+        if login_spec and login_spec.loader:
+            login_branding = importlib.util.module_from_spec(login_spec)
+            login_spec.loader.exec_module(login_branding)
+            login_branding.install_login_branding()
+    except Exception:
+        pass
 except Exception:
     pass
