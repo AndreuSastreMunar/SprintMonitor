@@ -9,9 +9,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="CTEIB Velocistas">
   <title>CTEIB Velocistas</title>
-  <link rel="manifest" href="/pwa/manifest.webmanifest">
-  <link rel="icon" type="image/svg+xml" href="/pwa/icon.svg">
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/cteib-icon.png">
+  <link rel="manifest" href="/pwa/manifest.webmanifest?v=4">
+  <link rel="icon" type="image/png" href="/assets/cteib-icon.png?v=4">
+  <link rel="shortcut icon" type="image/png" href="/assets/cteib-icon.png?v=4">
+  <link rel="apple-touch-icon" href="/assets/cteib-icon.png?v=4">
   <style>
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#fff}
     iframe{border:0;width:100%;height:100%;display:block;background:#fff}
@@ -19,6 +20,10 @@
 </head>
 <body>
   <iframe src="https://sprintmonitor-q8hmuzosqce4uv3wmwhums.streamlit.app/?embedded=true" allow="clipboard-read;clipboard-write;fullscreen" title="CTEIB Velocistas"></iframe>
-  <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/pwa/sw.js',{scope:'/'});}</script>
+  <script>
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).finally(()=>navigator.serviceWorker.register('/pwa/sw.js?v=4',{scope:'/'}));
+    }
+  </script>
 </body>
 </html>
