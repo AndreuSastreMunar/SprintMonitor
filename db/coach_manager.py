@@ -37,7 +37,6 @@ def _render_manager():
                         {"athlete_email": email.strip()},
                     ).execute()
                     st.success("Atleta añadido correctamente.")
-                    st.session_state["coach_manage_athlete_email"] = ""
                     st.rerun()
                 except Exception as exc:
                     st.error(f"No se pudo añadir el atleta: {exc}")
