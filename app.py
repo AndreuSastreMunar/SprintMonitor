@@ -1,8 +1,10 @@
+import runpy
 import streamlit as st
 
 # Punto de entrada estable de Sprint Monitor.
-# Mantiene toda la lógica en legacy_app.py y sustituye únicamente la cabecera
-# antigua del login por una sola cabecera CTEIB Velocistas.
+# Toda la lógica vive en legacy_app.py, que debe ejecutarse en CADA rerun de
+# Streamlit. No usamos `import legacy_app` porque Python lo cachea y, tras
+# pulsar un botón, el siguiente rerun podía quedar completamente en blanco.
 
 _original_set_page_config = st.set_page_config
 
@@ -61,7 +63,6 @@ _LOGIN_NEW = r'''
 
 
 def _markdown_with_single_login(body, *args, **kwargs):
-    # No renderizamos primero la cabecera antigua: la sustituimos directamente.
     if isinstance(body, str) and body == _LOGIN_OLD:
         return _original_markdown(_LOGIN_NEW, unsafe_allow_html=True)
     return _original_markdown(body, *args, **kwargs)
@@ -69,5 +70,5 @@ def _markdown_with_single_login(body, *args, **kwargs):
 
 st.markdown = _markdown_with_single_login
 
-# Ejecuta toda la aplicación original.
-import legacy_app  # noqa: E402,F401
+# Ejecuta toda la aplicación original cada vez que Streamlit hace rerun.
+runpy.run_path("legacy_app.py", run_name="__main__")
