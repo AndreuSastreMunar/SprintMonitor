@@ -1,61 +1,71 @@
-"""Identidad visual CTEIB Velocistas aplicada directamente al HTML generado."""
+"""Capa visual moderna y responsive para las pantallas de inicio."""
 
 import re
 import streamlit as st
 
-_LOGO_HTML = '''
-<div class="cteib-logo-wrap">
-  <div class="cteib-logo-mark">
-    <div class="cteib-logo-top">CTEIB</div>
-    <div class="cteib-logo-bottom"><span class="cteib-speed">◀◀◀</span>VELOCISTAS</div>
-  </div>
-  <div class="cteib-speedlines" aria-hidden="true"></div>
+
+_LOGO_HTML = r'''
+<div style="width:100%;margin:0 0 1.2rem 0;overflow:visible;">
+  <svg viewBox="0 0 520 125" role="img" aria-label="CTEIB Velocistas" style="display:block;width:min(430px,82vw);height:auto;overflow:visible;">
+    <defs>
+      <linearGradient id="p" x1="0" x2="1"><stop offset="0" stop-color="#5a08b6"/><stop offset="1" stop-color="#7e2bd2"/></linearGradient>
+      <linearGradient id="r" x1="0" x2="1"><stop offset="0" stop-color="#ff176f"/><stop offset="1" stop-color="#ef005a"/></linearGradient>
+    </defs>
+    <g transform="skewX(-9)">
+      <text x="42" y="58" fill="url(#p)" font-family="Arial Black,Arial,sans-serif" font-size="64" font-weight="900" letter-spacing="-4">CTEIB</text>
+      <polygon points="2,78 72,78 72,85 2,85" fill="#f60962"/>
+      <polygon points="18,91 72,91 72,98 18,98" fill="#f60962"/>
+      <polygon points="34,104 72,104 72,111 34,111" fill="#f60962"/>
+      <text x="82" y="111" fill="url(#r)" font-family="Arial Black,Arial,sans-serif" font-size="57" font-weight="900" letter-spacing="-4">VELOCISTAS</text>
+    </g>
+  </svg>
 </div>
 '''
 
-_EXTRA_CSS = '''
+_EXTRA_CSS = r'''
 <style>
-:root{--cteib-purple:#5b0bb8;--cteib-purple2:#7b22d3;--cteib-pink:#ff0b64;--cteib-ink:#151a2d;--cteib-muted:#7f8493}
-.block-container{max-width:980px!important;padding-top:2.7rem!important;padding-bottom:3rem!important}
+:root{--vp:#5c0ab9;--vp2:#7b25d1;--vr:#fa0a63;--ink:#171b2d;--muted:#858a98}
+/* Evita que el logo se meta debajo de la barra superior de Streamlit. */
+.block-container{max-width:1040px!important;padding-top:5.4rem!important;padding-bottom:3rem!important}
+header[data-testid="stHeader"]{background:rgba(255,255,255,.92)!important}
 
-.cteib-logo-wrap{position:relative;display:flex;align-items:flex-start;justify-content:space-between;min-height:92px;margin:0 0 1rem;overflow:visible}
-.cteib-logo-mark{position:relative;z-index:2;line-height:.76;transform:skew(-7deg);padding-top:.2rem}
-.cteib-logo-top,.cteib-logo-bottom{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-style:italic;font-weight:950;letter-spacing:-.06em;text-transform:uppercase;white-space:nowrap}
-.cteib-logo-top{font-size:clamp(2.65rem,5vw,4rem);color:var(--cteib-purple)}
-.cteib-logo-bottom{font-size:clamp(2.05rem,4.2vw,3.2rem);color:var(--cteib-pink);margin-left:.28rem}
-.cteib-speed{font-size:.62em;letter-spacing:-.18em;margin-right:.18em}
-.cteib-speedlines{position:absolute;right:-4%;top:.55rem;width:48%;height:72px;opacity:.42;background:linear-gradient(168deg,transparent 0 19%,rgba(255,11,100,.42) 20% 22%,transparent 23% 31%,rgba(91,11,184,.30) 32% 34%,transparent 35% 44%,rgba(255,11,100,.28) 45% 47%,transparent 48% 100%);transform:skewX(-24deg)}
+.home-hero{margin:.1rem 0 1.7rem}
+.home-hello{font-size:clamp(2.35rem,5vw,3.5rem);font-weight:900;letter-spacing:-.05em;line-height:1;color:var(--ink)}
+.home-sub{font-size:1.08rem;color:var(--muted);margin-top:.55rem;font-weight:650}
 
-.home-hero{margin:.2rem 0 1.55rem}
-.home-hello{font-size:clamp(2.25rem,5vw,3.35rem);font-weight:900;letter-spacing:-.045em;line-height:1.02;color:var(--cteib-ink)}
-.home-sub{font-size:1.04rem;color:var(--cteib-muted);margin-top:.45rem;font-weight:600}
+/* Tarjetas modernas: el layout se refuerza aquí y también inline. */
+.home-card{box-sizing:border-box!important;width:100%!important}
+.home-card-icon{flex:0 0 auto!important}
+.home-card-copy{min-width:0!important;flex:1 1 auto!important}
+.home-card-title{font-size:1.34rem!important;font-weight:900!important;letter-spacing:-.025em!important;color:var(--ink)!important;line-height:1.12!important}
+.home-card-sub{font-size:.97rem!important;color:var(--muted)!important;margin-top:.48rem!important;font-weight:560!important}
+.home-card-num{display:inline-flex!important;width:34px!important;height:34px!important;border-radius:999px!important;align-items:center!important;justify-content:center!important;color:#fff!important;font-weight:900!important;margin-top:.85rem!important}
+.home-card-arrow{font-size:2rem!important;font-weight:800!important;margin-left:auto!important;align-self:center!important}
 
-.home-card{position:relative;display:grid;grid-template-columns:88px 1fr 30px;gap:1rem;align-items:center;border:1px solid rgba(91,11,184,.10);border-radius:24px 24px 0 0;padding:1.35rem 1.45rem 1.2rem;min-height:158px;background:linear-gradient(145deg,#fff 0%,#fff 68%,#fbf8ff 100%);box-shadow:0 12px 30px rgba(34,20,70,.08);margin:0}
-.home-card-icon{display:flex;align-items:center;justify-content:center;width:82px;height:82px;border-radius:22px;font-size:2.35rem;background:linear-gradient(145deg,#e8d8ff 0%,#f6deff 100%);box-shadow:inset 0 0 0 1px rgba(91,11,184,.04)}
-.home-card[data-tone="pink"] .home-card-icon{background:linear-gradient(145deg,#ffd3e2,#ffe4ef)}
-.home-card-copy{min-width:0}.home-card-title{font-size:1.34rem;font-weight:900;letter-spacing:-.025em;color:var(--cteib-ink);line-height:1.12}.home-card-sub{font-size:.96rem;color:var(--cteib-muted);margin-top:.5rem;font-weight:540}.home-card-meta{display:flex;align-items:center;gap:.6rem;margin-top:.9rem}.home-card-num{display:inline-flex;width:34px;height:34px;border-radius:50%;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--cteib-purple),var(--cteib-purple2));color:#fff;font-size:.94rem;font-weight:900;box-shadow:0 6px 15px rgba(91,11,184,.24)}.home-card[data-tone="pink"] .home-card-num{background:linear-gradient(135deg,var(--cteib-pink),#ff477f);box-shadow:0 6px 15px rgba(255,11,100,.22)}
-.home-card-arrow{font-size:2rem;font-weight:800;color:var(--cteib-purple);align-self:center;justify-self:end}.home-card[data-tone="pink"] .home-card-arrow{color:var(--cteib-pink)}
+/* El botón real de Streamlit se integra visualmente como pie de tarjeta. */
+div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"]{margin-top:-.5rem!important}
+div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"] button{
+  min-height:50px!important;border-radius:0 0 23px 23px!important;border:1px solid rgba(92,10,185,.12)!important;border-top:0!important;
+  background:linear-gradient(90deg,#f3ecff,#fbf8ff)!important;color:var(--vp)!important;font-weight:850!important;
+  justify-content:flex-start!important;padding-left:1.35rem!important;box-shadow:0 13px 28px rgba(33,20,69,.08)!important
+}
+div[data-testid="stColumn"]:has(.home-card[data-tone="pink"]) div[data-testid="stButton"] button{
+  background:linear-gradient(90deg,#fff0f5,#fff8fb)!important;color:var(--vr)!important;border-color:rgba(250,10,99,.12)!important
+}
 
-/* Convierte el botón real de Streamlit en el pie de la tarjeta. */
-div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"]{margin-top:-.05rem!important}
-div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"] button{border-radius:0 0 24px 24px!important;min-height:54px!important;border:1px solid rgba(91,11,184,.10)!important;border-top:0!important;background:linear-gradient(90deg,#f5efff,#fbf7ff)!important;color:var(--cteib-purple)!important;font-weight:850!important;text-align:left!important;justify-content:flex-start!important;padding-left:1.45rem!important;box-shadow:0 12px 30px rgba(34,20,70,.08)!important;transition:.15s ease!important}
-div[data-testid="stColumn"]:has(.home-card[data-tone="pink"]) div[data-testid="stButton"] button{background:linear-gradient(90deg,#fff0f5,#fff8fa)!important;color:var(--cteib-pink)!important;border-color:rgba(255,11,100,.10)!important}
-div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"] button:hover{transform:translateY(-1px);filter:saturate(1.06);border-color:rgba(91,11,184,.24)!important}
-
-.stButton>button{border-radius:15px;min-height:46px;font-weight:750;width:100%;transition:.15s ease}
-.stButton>button:hover{transform:translateY(-1px);border-color:rgba(77,7,152,.35)}
+.stButton>button{border-radius:15px;min-height:46px;font-weight:750;transition:.15s ease}
+.stButton>button:hover{transform:translateY(-1px)}
 
 @media(max-width:700px){
-  .block-container{padding-top:1.8rem!important;padding-left:.75rem!important;padding-right:.75rem!important}
-  .cteib-logo-wrap{min-height:70px;margin-bottom:.65rem}.cteib-logo-top{font-size:2.45rem}.cteib-logo-bottom{font-size:1.88rem}.cteib-speedlines{display:none}
-  .home-hello{font-size:2.15rem}.home-sub{font-size:.9rem}.home-hero{margin-bottom:1rem}
+  .block-container{padding-top:4.6rem!important;padding-left:.75rem!important;padding-right:.75rem!important}
+  .home-hero{margin-bottom:1.15rem}.home-hello{font-size:2.15rem}.home-sub{font-size:.92rem}
   div[data-testid="stHorizontalBlock"]{gap:.65rem!important}
-  .home-card{grid-template-columns:56px 1fr 20px;gap:.72rem;min-height:126px;padding:.95rem .9rem .85rem;border-radius:19px 19px 0 0}.home-card-icon{width:54px;height:54px;border-radius:16px;font-size:1.65rem}.home-card-title{font-size:1.03rem}.home-card-sub{font-size:.78rem;margin-top:.3rem}.home-card-meta{margin-top:.55rem}.home-card-num{width:28px;height:28px;font-size:.8rem}.home-card-arrow{font-size:1.45rem}
-  div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"] button{min-height:45px!important;border-radius:0 0 19px 19px!important;padding-left:.9rem!important;font-size:.82rem!important}
+  .home-card-title{font-size:1.02rem!important}.home-card-sub{font-size:.78rem!important}.home-card-num{width:28px!important;height:28px!important;font-size:.8rem!important}.home-card-arrow{font-size:1.42rem!important}
+  div[data-testid="stColumn"]:has(.home-card) div[data-testid="stButton"] button{min-height:44px!important;border-radius:0 0 18px 18px!important;font-size:.8rem!important;padding-left:.8rem!important}
 }
 @media(max-width:430px){
-  .cteib-logo-top{font-size:2.05rem}.cteib-logo-bottom{font-size:1.58rem}
-  .home-card{grid-template-columns:48px 1fr 18px;padding:.82rem .72rem .72rem;min-height:116px}.home-card-icon{width:46px;height:46px;border-radius:14px;font-size:1.45rem}.home-card-title{font-size:.94rem}.home-card-sub{font-size:.72rem}.home-card-arrow{font-size:1.25rem}
+  .block-container{padding-top:4.35rem!important}
+  .home-card-title{font-size:.92rem!important}.home-card-sub{font-size:.7rem!important}.home-card-arrow{font-size:1.2rem!important}
 }
 </style>
 '''
@@ -78,15 +88,19 @@ def _modernize_card(body):
     subtitle = _extract(body, "menu-sub", "")
     number = _extract(body, "menu-num", "")
     tone = _tone_for(title)
+    pink = tone == "pink"
+    icon_bg = "linear-gradient(145deg,#ffd3e4,#ffe6f0)" if pink else "linear-gradient(145deg,#e5d4ff,#f2e7ff)"
+    accent = "#fa0a63" if pink else "#5c0ab9"
+    badge = "linear-gradient(135deg,#fa0a63,#ff4985)" if pink else "linear-gradient(135deg,#5c0ab9,#7b25d1)"
     return f'''
-<div class="home-card" data-tone="{tone}">
-  <div class="home-card-icon">{icon}</div>
+<div class="home-card" data-tone="{tone}" style="position:relative;display:flex;align-items:center;gap:1.15rem;min-height:158px;padding:1.35rem 1.35rem 1.25rem;border:1px solid rgba(92,10,185,.11);border-radius:23px 23px 0 0;background:linear-gradient(145deg,#fff 0%,#fff 72%,#fbf8ff 100%);box-shadow:0 13px 28px rgba(33,20,69,.08);overflow:hidden;">
+  <div class="home-card-icon" style="display:flex;align-items:center;justify-content:center;width:82px;height:82px;border-radius:22px;font-size:2.35rem;background:{icon_bg};">{icon}</div>
   <div class="home-card-copy">
     <div class="home-card-title">{title}</div>
     <div class="home-card-sub">{subtitle}</div>
-    <div class="home-card-meta"><span class="home-card-num">{number}</span></div>
+    <span class="home-card-num" style="background:{badge};box-shadow:0 6px 15px {accent}33;">{number}</span>
   </div>
-  <div class="home-card-arrow">→</div>
+  <div class="home-card-arrow" style="color:{accent};">→</div>
 </div>
 '''
 
