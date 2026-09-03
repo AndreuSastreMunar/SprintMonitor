@@ -31,9 +31,10 @@ create policy "athlete_read_own_coach_links"
 on public.coach_athletes for select to authenticated
 using (athlete_id = auth.uid());
 
--- Esta función ya se usa en las políticas RLS de entrenamiento, wellness, etc.
--- La redefinimos para aceptar tanto la nueva tabla como el coach_id antiguo.
-create or replace function public.is_assigned_coach(target_athlete_id uuid)
+-- Esta función ya existe en el esquema original con el parámetro target_athlete.
+-- Mantenemos exactamente ese nombre para que CREATE OR REPLACE funcione sin
+-- necesidad de eliminar primero la función (otras políticas dependen de ella).
+create or replace function public.is_assigned_coach(target_athlete uuid)
 returns boolean
 language sql
 stable
@@ -43,13 +44,13 @@ as $$
   select exists (
     select 1
     from public.coach_athletes ca
-    where ca.athlete_id = target_athlete_id
+    where ca.athlete_id = target_athlete
       and ca.coach_id = auth.uid()
   )
   or exists (
     select 1
     from public.profiles p
-    where p.id = target_athlete_id
+    where p.id = target_athlete
       and p.coach_id = auth.uid()
   );
 $$;
