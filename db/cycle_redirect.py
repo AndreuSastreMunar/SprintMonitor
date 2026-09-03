@@ -6,12 +6,14 @@ import streamlit as st
 from .multi_coach import install_multi_coach_support
 from .coach_manager import install_coach_manager
 from .chart_style import install_chart_style
+from .visual_branding import install_visual_branding
 
 
 def install_cycle_success_redirect():
     install_multi_coach_support()
     install_coach_manager()
     install_chart_style()
+    install_visual_branding()
 
     if hasattr(st, "_sprint_monitor_cycle_success_installed"):
         return
