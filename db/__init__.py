@@ -319,3 +319,7 @@ def _date_input_cycle_end_enabled(label, *args, **kwargs):
 
 
 st.date_input = _date_input_cycle_end_enabled
+
+
+from .cycle_redirect import install_cycle_success_redirect
+install_cycle_success_redirect()
