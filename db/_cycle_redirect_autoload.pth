@@ -1,1 +1,0 @@
-import db.cycle_redirect as _cycle_redirect; _cycle_redirect.install_cycle_success_redirect()
