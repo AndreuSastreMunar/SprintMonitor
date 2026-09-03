@@ -1,9 +1,9 @@
 {
   "name": "CTEIB Velocistas",
-  "short_name": "CTEIB",
+  "short_name": "CTEIB Velocistas",
   "description": "Sprint Monitor CTEIB Velocistas",
-  "id": "/",
-  "start_url": "/",
+  "id": "/?pwa=cteib-v4",
+  "start_url": "/?pwa=cteib-v4",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -11,10 +11,16 @@
   "theme_color": "#6817c5",
   "icons": [
     {
-      "src": "/pwa/icon.svg",
+      "src": "/assets/cteib-icon.png?v=4",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/cteib-icon.png?v=4",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
