@@ -4,10 +4,12 @@ import inspect
 import streamlit as st
 
 from .multi_coach import install_multi_coach_support
+from .coach_manager import install_coach_manager
 
 
 def install_cycle_success_redirect():
     install_multi_coach_support()
+    install_coach_manager()
 
     if hasattr(st, "_sprint_monitor_cycle_success_installed"):
         return
