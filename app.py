@@ -1,8 +1,20 @@
 import streamlit as st
+import streamlit.components.v1 as components
+
+# Fuerza el icono real de CTEIB Velocistas cuando legacy_app configure la página.
+_original_set_page_config = st.set_page_config
+
+def _set_page_config_cteib(*args, **kwargs):
+    kwargs["page_title"] = "CTEIB Velocistas"
+    kwargs["page_icon"] = "assets/cteib-icon.png"
+    return _original_set_page_config(*args, **kwargs)
+
+st.set_page_config = _set_page_config_cteib
 
 # Punto de entrada real de la app. El resto de la lógica se conserva intacta en
 # legacy_app.py; aquí solo modernizamos la pantalla de acceso antes de ejecutarla.
 _original_markdown = st.markdown
+_head_icon_injected = False
 
 _LOGIN_OLD = '<div class="brand">SPRINT MONITOR</div><div class="hello">100 / 200 m</div><div class="sub">Entrenamiento, bienestar, competición y evolución.</div>'
 
@@ -54,11 +66,61 @@ _LOGIN_NEW = r'''
 '''
 
 
+def _inject_mobile_icon_links():
+    global _head_icon_injected
+    if _head_icon_injected:
+        return
+    _head_icon_injected = True
+    components.html(
+        """
+        <script>
+        try {
+          const doc = window.parent.document;
+          const icon = doc.querySelector('link[rel="shortcut icon"], link[rel="icon"]');
+          if (icon && icon.href) {
+            doc.querySelectorAll('link[rel="apple-touch-icon"]').forEach(x => x.remove());
+            const apple = doc.createElement('link');
+            apple.rel = 'apple-touch-icon';
+            apple.href = icon.href;
+            doc.head.appendChild(apple);
+
+            const manifest = {
+              name: 'CTEIB Velocistas',
+              short_name: 'CTEIB Velocistas',
+              display: 'standalone',
+              start_url: window.parent.location.href,
+              background_color: '#ffffff',
+              theme_color: '#5a12c6',
+              icons: [
+                {src: icon.href, sizes: '192x192', type: 'image/png'},
+                {src: icon.href, sizes: '512x512', type: 'image/png'}
+              ]
+            };
+            const blob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
+            const url = URL.createObjectURL(blob);
+            doc.querySelectorAll('link[rel="manifest"]').forEach(x => x.remove());
+            const link = doc.createElement('link');
+            link.rel = 'manifest';
+            link.href = url;
+            doc.head.appendChild(link);
+            doc.title = 'CTEIB Velocistas';
+          }
+        } catch (e) { console.log('CTEIB icon setup skipped', e); }
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def _markdown_with_direct_login(body, *args, **kwargs):
+    result = _original_markdown(body, *args, **kwargs)
+    if isinstance(body, str) and '.block-container' in body:
+        _inject_mobile_icon_links()
     if isinstance(body, str) and body == _LOGIN_OLD:
-        body = _LOGIN_NEW
-        kwargs["unsafe_allow_html"] = True
-    return _original_markdown(body, *args, **kwargs)
+        # Renderiza encima el login moderno y oculta visualmente el bloque antiguo.
+        _original_markdown(_LOGIN_NEW, unsafe_allow_html=True)
+    return result
 
 
 st.markdown = _markdown_with_direct_login
