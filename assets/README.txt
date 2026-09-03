@@ -1,1 +1,0 @@
-CTEIB Velocistas visual assets.
