@@ -10,6 +10,7 @@
   "background_color": "#ffffff",
   "theme_color": "#5a12c6",
   "icons": [
-    {"src":"./icon.png?v=cteib2","sizes":"any","type":"image/png","purpose":"any"}
+    {"src":"./apple-touch-icon.png?v=cteib3","sizes":"180x180","type":"image/png","purpose":"any"},
+    {"src":"./icon.svg?v=cteib3","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
   ]
 }
